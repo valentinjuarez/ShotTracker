@@ -1,10 +1,15 @@
 // app/session/create.tsx
 import { ALL_SPOTS } from "@/src/data/spots";
+import { supabase } from "@/src/lib/supabase";
 import { Court } from "@/src/ui/Court";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useState } from "react";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   SafeAreaView,
@@ -15,6 +20,7 @@ import {
 } from "react-native";
 
 export default function CreateSession() {
+  const router = useRouter();
   const { width } = useWindowDimensions();
   const isSmall = width < 360;
 
@@ -25,9 +31,16 @@ export default function CreateSession() {
   const [defaultTarget, setDefaultTarget] = useState(10);
   const [showCourtModal, setShowCourtModal] = useState(false);
   const [currentSpotIndex, setCurrentSpotIndex] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   const selectedCount = selected.size;
   const currentSpot = ALL_SPOTS[currentSpotIndex];
+  const canContinue = selectedCount > 0 && !saving;
+
+  const selectedSpots = useMemo(() => {
+    const ids = selected;
+    return ALL_SPOTS.filter((s) => ids.has(s.id));
+  }, [selected]);
 
   function toggleSpot(id: string) {
     setSelected((prev) => {
@@ -38,13 +51,12 @@ export default function CreateSession() {
     });
   }
 
-  const canContinue = selectedCount > 0;
-
   const reset = useCallback(() => {
     setSelected(new Set());
     setDefaultTarget(10);
     setShowCourtModal(false);
     setCurrentSpotIndex(0);
+    setSaving(false);
   }, []);
 
   // ✅ Reset cuando salís de la pantalla
@@ -55,6 +67,82 @@ export default function CreateSession() {
       };
     }, [reset])
   );
+
+  async function createSessionAndGo() {
+    if (saving) return;
+
+    if (selectedCount === 0) {
+      Alert.alert("Falta info", "Elegí al menos una posición.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      // 1) user
+      const { data: auth, error: authErr } = await supabase.auth.getUser();
+      if (authErr) throw authErr;
+      const userId = auth.user?.id;
+      if (!userId) {
+        Alert.alert("Error", "No hay usuario logueado.");
+        return;
+      }
+
+      // 2) crear session
+      const title = `Sesión libre · ${new Date().toLocaleDateString()}`;
+      const { data: sessionRow, error: sErr } = await supabase
+        .from("sessions")
+        .insert({
+          user_id: userId,
+          kind: "FREE",
+          title,
+          default_target_attempts: defaultTarget,
+          status: "IN_PROGRESS",
+          started_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      if (sErr) throw sErr;
+      const sessionId = sessionRow?.id as string | undefined;
+      if (!sessionId) throw new Error("No se pudo crear la sesión (sin id).");
+
+      // 3) insertar spots de la sesión
+      const rows = selectedSpots.map((spot, idx) => ({
+        session_id: sessionId,
+        user_id: userId,
+        spot_key: spot.id,
+        shot_type: spot.shotType, // "2PT" | "3PT"
+        target_attempts: defaultTarget,
+        attempts: defaultTarget,
+        makes: 0,
+        order_index: idx,
+      }));
+
+      const { error: ssErr } = await supabase.from("session_spots").insert(rows);
+      if (ssErr) {
+        // Limpieza: si fallan los spots, borramos la sesión para no dejar basura
+        await supabase.from("sessions").delete().eq("id", sessionId);
+        throw ssErr;
+      }
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // 4) cerrar modal si estaba abierto y navegar a run
+      setShowCourtModal(false);
+
+      router.push({
+        pathname: "/session/run",
+        params: { sessionId },
+      });
+    } catch (e: any) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert("Error", e?.message ?? "Algo salió mal creando la sesión.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
@@ -74,6 +162,7 @@ export default function CreateSession() {
         </Text>
 
         <Pressable
+          disabled={saving}
           onPress={() => {
             setShowCourtModal(true);
             setCurrentSpotIndex(0);
@@ -110,7 +199,7 @@ export default function CreateSession() {
               }}
             >
               <Text style={{ color: "white", fontWeight: "700", fontSize: 15 }}>
-                Tocar para elegir spots
+                {saving ? "Creando sesión..." : "Tocar para elegir spots"}
               </Text>
             </View>
           </View>
@@ -141,6 +230,7 @@ export default function CreateSession() {
                   Elegir posiciones
                 </Text>
                 <Pressable
+                  disabled={saving}
                   onPress={() => setShowCourtModal(false)}
                   style={{
                     width: 36,
@@ -149,6 +239,7 @@ export default function CreateSession() {
                     backgroundColor: "rgba(255,255,255,0.1)",
                     alignItems: "center",
                     justifyContent: "center",
+                    opacity: saving ? 0.5 : 1,
                   }}
                 >
                   <Ionicons name="close" size={24} color="white" />
@@ -167,7 +258,7 @@ export default function CreateSession() {
                   height={Math.min(width - 40, 600) * 1.1}
                   spots={ALL_SPOTS}
                   selectedIds={selected}
-                  onToggleSpot={toggleSpot}
+                  onToggleSpot={saving ? () => {} : toggleSpot}
                   highlightedSpotId={currentSpot.id}
                 />
               </ScrollView>
@@ -195,6 +286,7 @@ export default function CreateSession() {
 
                 {/* Botón seleccionar/deseleccionar */}
                 <Pressable
+                  disabled={saving}
                   onPress={() => toggleSpot(currentSpot.id)}
                   style={{
                     height: 52,
@@ -208,6 +300,7 @@ export default function CreateSession() {
                       : "rgba(245,158,11,0.8)",
                     alignItems: "center",
                     justifyContent: "center",
+                    opacity: saving ? 0.6 : 1,
                   }}
                 >
                   <Text
@@ -226,6 +319,7 @@ export default function CreateSession() {
                 {/* Controles de navegación */}
                 <View style={{ flexDirection: "row", gap: 12 }}>
                   <Pressable
+                    disabled={saving}
                     onPress={() =>
                       setCurrentSpotIndex((prev) =>
                         prev > 0 ? prev - 1 : ALL_SPOTS.length - 1
@@ -240,6 +334,7 @@ export default function CreateSession() {
                       justifyContent: "center",
                       flexDirection: "row",
                       gap: 8,
+                      opacity: saving ? 0.6 : 1,
                     }}
                   >
                     <Ionicons name="chevron-back" size={20} color="white" />
@@ -247,6 +342,7 @@ export default function CreateSession() {
                   </Pressable>
 
                   <Pressable
+                    disabled={saving}
                     onPress={() =>
                       setCurrentSpotIndex((prev) =>
                         prev < ALL_SPOTS.length - 1 ? prev + 1 : 0
@@ -261,6 +357,7 @@ export default function CreateSession() {
                       justifyContent: "center",
                       flexDirection: "row",
                       gap: 8,
+                      opacity: saving ? 0.6 : 1,
                     }}
                   >
                     <Text style={{ color: "white", fontWeight: "700" }}>Siguiente</Text>
@@ -310,8 +407,12 @@ export default function CreateSession() {
           </View>
 
           <View style={{ flexDirection: "row", gap: 10 }}>
-            <Chip onPress={() => setDefaultTarget((v) => Math.max(1, v - 1))} label="-" />
-            <Chip onPress={() => setDefaultTarget((v) => v + 1)} label="+" />
+            <Chip
+              disabled={saving}
+              onPress={() => setDefaultTarget((v) => Math.max(1, v - 1))}
+              label="-"
+            />
+            <Chip disabled={saving} onPress={() => setDefaultTarget((v) => v + 1)} label="+" />
           </View>
         </View>
 
@@ -339,23 +440,44 @@ export default function CreateSession() {
               justifyContent: "center",
               flexDirection: "row",
               gap: 8,
+              opacity: saving ? 0.9 : 1,
             }}
-            onPress={() => {
-              console.log("Selected:", Array.from(selected), "defaultTarget:", defaultTarget);
-            }}
+            onPress={createSessionAndGo}
           >
-            <Text style={{ color: "#0B1220", fontWeight: "900" }}>Listo</Text>
-            <Ionicons name="chevron-forward" size={18} color="#0B1220" />
+            {saving ? (
+              <ActivityIndicator />
+            ) : (
+              <>
+                <Text style={{ color: "#0B1220", fontWeight: "900" }}>Listo</Text>
+                <Ionicons name="chevron-forward" size={18} color="#0B1220" />
+              </>
+            )}
           </Pressable>
         </View>
+
+        {/* Hint UX */}
+        {!saving && selectedCount === 0 ? (
+          <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 12 }}>
+            Tip: tocá la cancha para elegir tus spots.
+          </Text>
+        ) : null}
       </View>
     </SafeAreaView>
   );
 }
 
-function Chip({ label, onPress }: { label: string; onPress: () => void }) {
+function Chip({
+  label,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
   return (
     <Pressable
+      disabled={disabled}
       onPress={onPress}
       style={{
         width: 44,
@@ -366,6 +488,7 @@ function Chip({ label, onPress }: { label: string; onPress: () => void }) {
         borderColor: "rgba(255,255,255,0.12)",
         alignItems: "center",
         justifyContent: "center",
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       <Text style={{ color: "white", fontWeight: "900", fontSize: 18 }}>{label}</Text>
