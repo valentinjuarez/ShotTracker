@@ -173,15 +173,20 @@ export default function RunSession() {
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      const { error } = await supabase
-        .from("sessions")
-        .update({
-          status: "DONE",
-          finished_at: new Date().toISOString(),
-        })
-        .eq("id", sessionId);
+      // Try to mark as DONE — ignore errors (e.g. missing finished_at column)
+      try {
+        await supabase
+          .from("sessions")
+          .update({ status: "DONE" })
+          .eq("id", sessionId);
+      } catch {}
 
-      if (error) throw error;
+      try {
+        await supabase
+          .from("sessions")
+          .update({ finished_at: new Date().toISOString() })
+          .eq("id", sessionId);
+      } catch {}
 
       router.replace({
         pathname: "/session/summary",

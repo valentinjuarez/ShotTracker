@@ -25,37 +25,75 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <Stack screenOptions={{ headerShown: false }}>
-        {/* Creamos stacks SIEMPRE (router content) */}
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(trainer)" />
       </Stack>
 
-      {/* Gate por sesión en una pantalla aparte */}
       {ready ? <AuthGate session={session} /> : null}
     </QueryClientProvider>
   );
 }
 
+import { supabase as _supabase } from "@/src/lib/supabase";
 import { useRouter, useSegments } from "expo-router";
-import { useEffect as useEffect2 } from "react";
+import { useEffect as useEffect2, useState as useState2 } from "react";
 
 function AuthGate({ session }: { session: Session | null }) {
-  const router = useRouter();
-  const segments = useSegments(); // ["(tabs)", "index"] etc.
+  const router   = useRouter();
+  const segments = useSegments();
+  const [role, setRole] = useState2<"player" | "coach" | null>(null);
+  const [roleReady, setRoleReady] = useState2(false);
+
+  // Fetch role whenever session changes
+  useEffect2(() => {
+    if (!session) { setRole(null); setRoleReady(true); return; }
+    // Fallback chain: profiles.role → user_metadata.role → "player"
+    const metaRole =
+      session.user.user_metadata?.role === "coach" ? "coach" : "player";
+
+    _supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", session.user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        const resolved: "player" | "coach" =
+          (data?.role as "player" | "coach") ?? metaRole;
+        setRole(resolved);
+        setRoleReady(true);
+      });
+  }, [session]);
 
   useEffect2(() => {
-    const inAuthGroup = segments[0] === "(auth)";
+    if (!roleReady) return;
 
-    // Si NO hay sesión y estoy fuera de auth => mandar a login
-    if (!session && !inAuthGroup) {
+    const inAuth    = segments[0] === "(auth)";
+    const inTabs    = segments[0] === "(tabs)";
+    const inTrainer = segments[0] === "(trainer)";
+
+    if (!session && !inAuth) {
       router.replace("/(auth)/login");
+      return;
     }
 
-    // Si hay sesión y estoy en auth => mandar a tabs
-    if (session && inAuthGroup) {
-      router.replace("/(tabs)");
+    if (session && inAuth) {
+      role === "coach"
+        ? router.replace("/(trainer)")
+        : router.replace("/(tabs)");
+      return;
     }
-  }, [session, segments, router]);
+
+    // Prevent coach from accessing player tabs and vice-versa
+    if (session && role === "coach" && inTabs) {
+      router.replace("/(trainer)");
+      return;
+    }
+    if (session && role === "player" && inTrainer) {
+      router.replace("/(tabs)");
+      return;
+    }
+  }, [session, role, roleReady, segments, router]);
 
   return null;
 }
