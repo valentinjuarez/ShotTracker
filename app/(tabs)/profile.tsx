@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Pressable,
     RefreshControl,
     SafeAreaView,
@@ -105,6 +106,40 @@ export default function Profile() {
     await supabase.auth.signOut();
   }
 
+  function onDeleteAccount() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    Alert.alert(
+      "Eliminar cuenta",
+      "Esto borrará permanentemente todas tus planillas, sesiones y datos. ¿Estás seguro?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar todo",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const { data: auth } = await supabase.auth.getUser();
+              const userId = auth.user?.id;
+              if (!userId) return;
+              const { data: sids } = await supabase.from("sessions").select("id").eq("user_id", userId);
+              const sessionIds = (sids ?? []).map((s: any) => s.id);
+              if (sessionIds.length > 0) {
+                await supabase.from("session_spots").delete().in("session_id", sessionIds);
+              }
+              await supabase.from("sessions").delete().eq("user_id", userId);
+              await supabase.from("workouts").delete().eq("user_id", userId);
+              await supabase.from("team_members").delete().eq("user_id", userId);
+              await supabase.from("profiles").delete().eq("id", userId);
+              await supabase.auth.signOut();
+            } catch {
+              Alert.alert("Error", "No se pudo eliminar la cuenta.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
   const overallPct = totalAttempts && totalAttempts > 0 && totalMakes != null
     ? totalMakes / totalAttempts
     : null;
@@ -192,6 +227,22 @@ export default function Profile() {
           <Ionicons name="log-out-outline" size={19} color="rgba(239,68,68,0.90)" />
           <Text style={{ color: "rgba(239,68,68,0.90)", fontWeight: "800", fontSize: 15 }}>
             Cerrar sesión
+          </Text>
+        </Pressable>
+
+        {/* Delete account */}
+        <Pressable
+          onPress={onDeleteAccount}
+          style={{
+            flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+            height: 48, borderRadius: 16,
+            backgroundColor: "transparent",
+            borderWidth: 1, borderColor: "rgba(239,68,68,0.18)",
+          }}
+        >
+          <Ionicons name="trash-outline" size={16} color="rgba(239,68,68,0.50)" />
+          <Text style={{ color: "rgba(239,68,68,0.50)", fontWeight: "700", fontSize: 13 }}>
+            Eliminar cuenta
           </Text>
         </Pressable>
       </ScrollView>

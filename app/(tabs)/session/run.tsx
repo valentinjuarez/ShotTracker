@@ -34,8 +34,9 @@ export default function RunSession() {
   const courtW = Math.min(width - (isSmall ? 32 : 40), 520);
   const courtH = Math.round(courtW * 1.08);
 
-  const params = useLocalSearchParams<{ sessionId?: string }>();
+  const params = useLocalSearchParams<{ sessionId?: string; workoutId?: string }>();
   const sessionId = params.sessionId;
+  const workoutId = params.workoutId;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -173,24 +174,39 @@ export default function RunSession() {
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // Try to mark as DONE — ignore errors (e.g. missing finished_at column)
+      // Mark session as DONE
       try {
         await supabase
           .from("sessions")
-          .update({ status: "DONE" })
+          .update({ status: "DONE", finished_at: new Date().toISOString() })
           .eq("id", sessionId);
       } catch {}
 
-      try {
-        await supabase
-          .from("sessions")
-          .update({ finished_at: new Date().toISOString() })
-          .eq("id", sessionId);
-      } catch {}
+      // If this belongs to a workout, check if all sessions are done and mark workout DONE
+      if (workoutId) {
+        try {
+          const { data: wk } = await supabase
+            .from("workouts")
+            .select("sessions_goal")
+            .eq("id", workoutId)
+            .single();
+          const { count: doneCount } = await supabase
+            .from("sessions")
+            .select("id", { count: "exact", head: true })
+            .eq("workout_id", workoutId)
+            .eq("status", "DONE");
+          if (wk && doneCount !== null && doneCount >= wk.sessions_goal) {
+            await supabase
+              .from("workouts")
+              .update({ status: "DONE" })
+              .eq("id", workoutId);
+          }
+        } catch {}
+      }
 
       router.replace({
         pathname: "/session/summary",
-        params: { sessionId },
+        params: { sessionId, ...(workoutId ? { workoutId } : {}) },
       });
     } catch (e: any) {
       Alert.alert(

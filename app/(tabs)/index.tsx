@@ -61,8 +61,16 @@ export default function Home() {
   const [weeklyPct, setWeeklyPct]     = useState<number | null>(null);
   const [lastSession, setLastSession] = useState<SessionRow | null>(null);
   const [lastSpots, setLastSpots]     = useState<SpotAgg>({ attempts: 0, makes: 0 });
-  const [inProgressWorkout, setInProgressWorkout] = useState<{ id: string; title: string } | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [inProgressWorkout, setInProgressWorkout] = useState<{
+    id: string;
+    title: string;
+    status: string;
+    sessionsGoal: number;
+    completedSessions: number;
+    currentSessionId: string | null;
+  } | null>(null);
+  const [refreshing, setRefreshing]       = useState(false);
+  const [startingSession, setStartingSession] = useState(false);
 
   const initials = useMemo(() => {
     const n = (name || "").trim();
@@ -136,16 +144,43 @@ export default function Home() {
         setLastSession(null);
       }
 
-      // In-progress workout (placeholder  workouts table may not exist yet, soft fail)
+      // Most recent workout (any status)
       try {
         const { data: wk } = await supabase
           .from("workouts")
-          .select("id, title")
+          .select("id, title, sessions_goal, status")
           .eq("user_id", userId)
-          .eq("status", "IN_PROGRESS")
           .order("created_at", { ascending: false })
           .limit(1);
-        setInProgressWorkout((wk ?? [])[0] ?? null);
+        const w = (wk ?? [])[0] as any;
+        if (w) {
+          // Count completed sessions
+          const { count: doneCount } = await supabase
+            .from("sessions")
+            .select("id", { count: "exact", head: true })
+            .eq("workout_id", w.id)
+            .eq("status", "DONE");
+
+          // Find current IN_PROGRESS session (only relevant if workout is IN_PROGRESS)
+          const { data: activeSess } = await supabase
+            .from("sessions")
+            .select("id")
+            .eq("workout_id", w.id)
+            .eq("status", "IN_PROGRESS")
+            .order("session_number", { ascending: false })
+            .limit(1);
+
+          setInProgressWorkout({
+            id: w.id,
+            title: w.title,
+            status: w.status,
+            sessionsGoal: w.sessions_goal ?? 0,
+            completedSessions: doneCount ?? 0,
+            currentSessionId: (activeSess ?? [])[0]?.id ?? null,
+          });
+        } else {
+          setInProgressWorkout(null);
+        }
       } catch { setInProgressWorkout(null); }
 
     } finally {
@@ -160,6 +195,48 @@ export default function Home() {
     await loadData();
     setRefreshing(false);
   }, [loadData]);
+
+  async function onContinueWorkout() {
+    if (!inProgressWorkout || startingSession) return;
+
+    // Never exceed the sessions goal
+    if (
+      !inProgressWorkout.currentSessionId &&
+      inProgressWorkout.completedSessions >= inProgressWorkout.sessionsGoal
+    ) return;
+
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // Resume existing IN_PROGRESS session without creating a new one
+    if (inProgressWorkout.currentSessionId) {
+      router.push({
+        pathname: "/(tabs)/session/run",
+        params: {
+          sessionId: inProgressWorkout.currentSessionId,
+          workoutId: inProgressWorkout.id,
+        },
+      });
+      return;
+    }
+
+    // No active session yet for today — create it via RPC
+    try {
+      setStartingSession(true);
+      const { data: rpcData, error: rpcErr } = await supabase
+        .rpc("create_next_workout_session", { p_workout_id: inProgressWorkout.id });
+      if (rpcErr) throw rpcErr;
+      const newSessionId = (rpcData as any).session_id as string;
+      router.push({
+        pathname: "/(tabs)/session/run",
+        params: { sessionId: newSessionId, workoutId: inProgressWorkout.id },
+      });
+    } catch (e: any) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      alert(e?.message ?? "No se pudo iniciar la sesión.");
+    } finally {
+      setStartingSession(false);
+    }
+  }
 
   async function onLogout() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -405,20 +482,56 @@ export default function Home() {
         <Animated.View style={[card, workoutAnim]}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
             <Text style={{ color: "white", fontWeight: "900", fontSize: 15, letterSpacing: -0.2 }}>Planilla activa</Text>
-            <PillBtn onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}>
+            <PillBtn onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/(tabs)/workout/" as any);
+            }}>
               <Text style={{ color: "rgba(255,255,255,0.55)", fontWeight: "700", fontSize: 12 }}>Ver todas</Text>
               <Ionicons name="chevron-forward" size={12} color="rgba(255,255,255,0.35)" />
             </PillBtn>
           </View>
 
-          {inProgressWorkout ? (
+          {inProgressWorkout && (inProgressWorkout.status === "DONE" || (!inProgressWorkout.currentSessionId &&
+           inProgressWorkout.completedSessions >= inProgressWorkout.sessionsGoal)) ? (
+            /* ── Planilla completada ── */
+            <View style={{
+              padding: 14, borderRadius: 14, gap: 8,
+              backgroundColor: "rgba(34,197,94,0.08)",
+              borderWidth: 1, borderColor: "rgba(34,197,94,0.28)",
+            }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <View style={{
+                  width: 40, height: 40, borderRadius: 12,
+                  backgroundColor: "rgba(34,197,94,0.15)",
+                  borderWidth: 1, borderColor: "rgba(34,197,94,0.28)",
+                  alignItems: "center", justifyContent: "center",
+                }}>
+                  <Ionicons name="trophy" size={18} color="rgba(34,197,94,1)" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: "white", fontWeight: "900", fontSize: 14 }} numberOfLines={1}>
+                    {inProgressWorkout.title}
+                  </Text>
+                  <Text style={{ color: "rgba(34,197,94,0.80)", fontSize: 12 }}>
+                    ¡Completada! · {inProgressWorkout.sessionsGoal} sesiones
+                  </Text>
+                </View>
+              </View>
+              <View style={{ height: 3, borderRadius: 99, backgroundColor: "rgba(34,197,94,0.15)", overflow: "hidden" }}>
+                <View style={{ height: 3, borderRadius: 99, backgroundColor: "rgba(34,197,94,0.70)", width: "100%" }} />
+              </View>
+            </View>
+          ) : inProgressWorkout ? (
+            /* ── Planilla en progreso ── */
             <Pressable
-              onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+              onPress={onContinueWorkout}
+              disabled={startingSession}
               style={{
                 flexDirection: "row", alignItems: "center", gap: 12,
                 padding: 14, borderRadius: 14,
                 backgroundColor: "rgba(99,179,237,0.08)",
                 borderWidth: 1, borderColor: "rgba(99,179,237,0.22)",
+                opacity: startingSession ? 0.7 : 1,
               }}
             >
               <View style={{
@@ -427,15 +540,41 @@ export default function Home() {
                 borderWidth: 1, borderColor: "rgba(99,179,237,0.28)",
                 alignItems: "center", justifyContent: "center",
               }}>
-                <Ionicons name="play" size={16} color="rgba(99,179,237,1)" />
+                {startingSession
+                  ? <ActivityIndicator size="small" color="rgba(99,179,237,1)" />
+                  : <Ionicons name={inProgressWorkout.currentSessionId ? "play" : "add-circle"} size={16} color="rgba(99,179,237,1)" />}
               </View>
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: 1, gap: 4 }}>
                 <Text style={{ color: "white", fontWeight: "900", fontSize: 14 }} numberOfLines={1}>
                   {inProgressWorkout.title}
                 </Text>
-                <Text style={{ color: "rgba(99,179,237,0.70)", fontSize: 12 }}>En progreso</Text>
+                <View style={{ gap: 5 }}>
+                  <Text style={{ color: "rgba(99,179,237,0.70)", fontSize: 12 }}>
+                    {inProgressWorkout.currentSessionId
+                      ? `Sesión ${inProgressWorkout.completedSessions + 1} en progreso…`
+                      : `Sesión ${inProgressWorkout.completedSessions + 1} de ${inProgressWorkout.sessionsGoal}`}
+                  </Text>
+                  {inProgressWorkout.sessionsGoal > 0 && (
+                    <View style={{ height: 3, borderRadius: 99, backgroundColor: "rgba(99,179,237,0.12)", overflow: "hidden" }}>
+                      <View style={{
+                        height: 3, borderRadius: 99,
+                        backgroundColor: "rgba(99,179,237,0.70)",
+                        width: `${Math.min(100, Math.round((inProgressWorkout.completedSessions / inProgressWorkout.sessionsGoal) * 100))}%`,
+                      }} />
+                    </View>
+                  )}
+                </View>
               </View>
-              <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.22)" />
+              <View style={{
+                flexDirection: "row", alignItems: "center", gap: 4,
+                paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10,
+                backgroundColor: "rgba(99,179,237,0.15)",
+              }}>
+                <Text style={{ color: "rgba(99,179,237,1)", fontWeight: "900", fontSize: 12 }}>
+                  {inProgressWorkout.currentSessionId ? "Continuar" : "Empezar"}
+                </Text>
+                <Ionicons name="arrow-forward" size={12} color="rgba(99,179,237,1)" />
+              </View>
             </Pressable>
           ) : (
             <View style={{ alignItems: "center", gap: 10, paddingVertical: 20 }}>

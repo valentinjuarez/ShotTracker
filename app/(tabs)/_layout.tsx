@@ -63,6 +63,7 @@ export default function TabLayout() {
       <Tabs.Screen name="session/run"     options={{ href: null }} />
       <Tabs.Screen name="session/summary" options={{ href: null }} />
       <Tabs.Screen name="workout/create"  options={{ href: null }} />
+      <Tabs.Screen name="workout/index"   options={{ href: null }} />
     </Tabs>
   );
 }

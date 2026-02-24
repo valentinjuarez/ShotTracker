@@ -34,7 +34,7 @@ export default function TrainerLayout() {
       <Tabs.Screen
         name="players"
         options={{
-          title: "Jugadoras",
+          title: "Jugadores",
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="list.bullet" color={color} />,
         }}
       />
@@ -52,6 +52,7 @@ export default function TrainerLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="person.fill" color={color} />,
         }}
       />
+      <Tabs.Screen name="create-team" options={{ href: null }} />
     </Tabs>
   );
 }

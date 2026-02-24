@@ -4,18 +4,18 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    RefreshControl,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -31,6 +31,7 @@ type MemberRow = {
   user_id: string;
   role: "player" | "coach";
   joined_at: string;
+  display_name: string | null;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -113,7 +114,23 @@ export default function TeamScreen() {
         .eq("team_id", t.id)
         .order("joined_at", { ascending: true });
 
-      setMembers((allMembers ?? []) as MemberRow[]);
+      // Fetch display names from profiles
+      const memberIds = (allMembers ?? []).map((m: any) => m.user_id);
+      let nameMap: Record<string, string | null> = {};
+      if (memberIds.length > 0) {
+        const { data: profileRows } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", memberIds);
+        (profileRows ?? []).forEach((p: any) => { nameMap[p.id] = p.display_name; });
+      }
+
+      setMembers(
+        (allMembers ?? []).map((m: any) => ({
+          ...m,
+          display_name: nameMap[m.user_id] ?? null,
+        })) as MemberRow[]
+      );
     } catch {
       setTeam(null);
     } finally {
@@ -143,39 +160,21 @@ export default function TeamScreen() {
       setJoining(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      // Find team by code
-      const { data: found, error: findErr } = await supabase
-        .from("teams")
-        .select("id, name, invite_code")
-        .eq("invite_code", code)
-        .maybeSingle();
+      const { data, error } = await supabase
+        .rpc("join_team_by_code", { invite_code: code });
 
-      if (findErr) throw findErr;
-      if (!found) {
+      if (error) throw error;
+
+      if (data?.error === "team_not_found") {
         Alert.alert("Código inválido", "No encontramos ningún equipo con ese código. Verificá con tu entrenador.");
         return;
       }
 
-      // Check not already a member
-      const { data: exists } = await supabase
-        .from("team_members")
-        .select("id")
-        .eq("team_id", found.id)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (exists) {
+      if (data?.error === "already_member") {
         Alert.alert("Ya sos parte", "Ya estás unido/a a este equipo.");
         await loadData();
         return;
       }
-
-      // Insert membership
-      const { error: insertErr } = await supabase
-        .from("team_members")
-        .insert({ team_id: found.id, user_id: userId, role: "player" });
-
-      if (insertErr) throw insertErr;
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setCodeInput("");
@@ -549,7 +548,7 @@ function MembersCard({ members, userId }: { members: MemberRow[]; userId: string
       {players.length > 0 && (
         <View style={{ gap: 8 }}>
           <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 11, letterSpacing: 0.8, textTransform: "uppercase" }}>
-            Jugadoras
+            Jugadores
           </Text>
           {players.map((m) => (
             <MemberRow key={m.id} member={m} isMe={m.user_id === userId} />
@@ -590,7 +589,7 @@ function MemberRow({ member, isMe }: { member: MemberRow; isMe: boolean }) {
           color: isMe ? "#F59E0B" : "white",
           fontWeight: "800", fontSize: 14,
         }}>
-          {isMe ? "Vos" : `Jugador · ${member.user_id.slice(0, 6)}`}
+          {isMe ? "Vos" : (member.display_name ?? `${member.user_id.slice(0, 6)}…`)}
         </Text>
         {joinDate && (
           <Text style={{ color: "rgba(255,255,255,0.30)", fontSize: 12 }}>

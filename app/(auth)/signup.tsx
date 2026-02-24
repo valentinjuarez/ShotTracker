@@ -3,15 +3,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-    Animated,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 type UserRole = "player" | "coach";
@@ -336,13 +336,6 @@ export default function Signup() {
         // Show inline error (reuse successMsg area with red)
         setSuccessMsg("❌ " + error.message);
         return;
-      }
-
-      if (data.session && data.user) {
-        const { error: upsertErr } = await supabase
-          .from("profiles")
-          .upsert({ id: data.user.id, display_name: displayName.trim(), role }, { onConflict: "id" });
-        if (upsertErr) console.warn("[signup] profiles upsert:", upsertErr.message);
       }
 
       setSuccessMsg(

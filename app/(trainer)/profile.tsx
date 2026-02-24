@@ -6,6 +6,7 @@ import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Pressable,
     RefreshControl,
     SafeAreaView,
@@ -26,6 +27,7 @@ export default function CoachProfile() {
   const [teamStats, setTeamStats]   = useState<{
     players: number; totalSessions: number; totalAttempts: number; teamPct: number | null;
   } | null>(null);
+  const [teamId, setTeamId]         = useState<string | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
 
   const loadStats = useCallback(async () => {
@@ -41,13 +43,14 @@ export default function CoachProfile() {
         .eq("role", "coach")
         .maybeSingle();
 
-      if (!membership) { setTeamStats(null); return; }
-      const teamId = (membership as any).team_id as string;
+      if (!membership) { setTeamStats(null); setTeamId(null); return; }
+      const tId = (membership as any).team_id as string;
+      setTeamId(tId);
 
       const { data: members } = await supabase
         .from("team_members")
         .select("user_id")
-        .eq("team_id", teamId)
+        .eq("team_id", tId)
         .eq("role", "player");
 
       const playerIds: string[] = (members ?? []).map((m: any) => m.user_id);
@@ -101,6 +104,63 @@ export default function CoachProfile() {
   async function onLogout() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await supabase.auth.signOut();
+  }
+
+  function onDeleteTeam() {
+    if (!teamId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    Alert.alert(
+      "Eliminar equipo",
+      "Esto borrará el equipo y removerá a todos los jugadores. ¿Estás seguro?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar equipo",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await supabase.from("team_members").delete().eq("team_id", teamId);
+              await supabase.from("teams").delete().eq("id", teamId);
+              setTeamStats(null);
+              setTeamId(null);
+            } catch {
+              Alert.alert("Error", "No se pudo eliminar el equipo.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  function onDeleteAccount() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    Alert.alert(
+      "Eliminar cuenta",
+      "Esto borrará permanentemente tu cuenta y todos los datos. ¿Estás seguro?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar todo",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const { data: auth } = await supabase.auth.getUser();
+              const userId = auth.user?.id;
+              if (!userId) return;
+              if (teamId) {
+                await supabase.from("team_members").delete().eq("team_id", teamId);
+                await supabase.from("teams").delete().eq("id", teamId);
+              }
+              await supabase.from("team_members").delete().eq("user_id", userId);
+              await supabase.from("profiles").delete().eq("id", userId);
+              await supabase.auth.signOut();
+            } catch {
+              Alert.alert("Error", "No se pudo eliminar la cuenta.");
+            }
+          },
+        },
+      ]
+    );
   }
 
   function pctColor(p: number) {
@@ -215,6 +275,40 @@ export default function CoachProfile() {
           <Ionicons name="log-out-outline" size={19} color="rgba(239,68,68,0.85)" />
           <Text style={{ color: "rgba(239,68,68,0.85)", fontWeight: "800", fontSize: 15 }}>
             Cerrar sesión
+          </Text>
+        </Pressable>
+
+        {/* Delete team */}
+        {teamId && (
+          <Pressable
+            onPress={onDeleteTeam}
+            style={{
+              flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+              height: 48, borderRadius: 16,
+              backgroundColor: "transparent",
+              borderWidth: 1, borderColor: "rgba(239,68,68,0.22)",
+            }}
+          >
+            <Ionicons name="people-outline" size={16} color="rgba(239,68,68,0.55)" />
+            <Text style={{ color: "rgba(239,68,68,0.55)", fontWeight: "700", fontSize: 13 }}>
+              Eliminar equipo
+            </Text>
+          </Pressable>
+        )}
+
+        {/* Delete account */}
+        <Pressable
+          onPress={onDeleteAccount}
+          style={{
+            flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+            height: 48, borderRadius: 16,
+            backgroundColor: "transparent",
+            borderWidth: 1, borderColor: "rgba(239,68,68,0.14)",
+          }}
+        >
+          <Ionicons name="trash-outline" size={16} color="rgba(239,68,68,0.40)" />
+          <Text style={{ color: "rgba(239,68,68,0.40)", fontWeight: "700", fontSize: 13 }}>
+            Eliminar cuenta
           </Text>
         </Pressable>
       </ScrollView>

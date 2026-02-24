@@ -28,17 +28,25 @@ export function useProfile() {
         .eq("id", userId)
         .maybeSingle();
 
-      if (dbErr) throw dbErr;
-
       // Resolve role: prefer DB value, fall back to auth metadata
       const meta: any = auth.user?.user_metadata ?? {};
       const metaRole: UserRole =
         meta.role === "coach" ? "coach" : "player";
 
+      // If DB fails (e.g. RLS infinite recursion), fall back to auth metadata
+      if (dbErr || !data) {
+        setProfile({
+          id:           userId,
+          display_name: meta.display_name ?? meta.full_name ?? null,
+          role:         metaRole,
+        });
+        return;
+      }
+
       if (data) {
         setProfile({
           id:           data.id,
-          display_name: data.display_name ?? null,
+          display_name: data.display_name ?? meta.display_name ?? meta.full_name ?? null,
           // If role column is null/missing (col not added yet) fall back to metadata
           role:         (data.role as UserRole) ?? metaRole,
         });

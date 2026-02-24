@@ -177,7 +177,7 @@ export default function PlayersScreen() {
       >
         <View style={{ marginBottom: 4 }}>
           <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 12 }}>Estadísticas</Text>
-          <Text style={{ color: "white", fontSize: 22, fontWeight: "900", letterSpacing: -0.4 }}>Jugadoras</Text>
+          <Text style={{ color: "white", fontSize: 22, fontWeight: "900", letterSpacing: -0.4 }}>Jugadores</Text>
         </View>
 
         {loading ? (
@@ -186,7 +186,7 @@ export default function PlayersScreen() {
           <View style={[card, { alignItems: "center", gap: 10, paddingVertical: 40 }]}>
             <Ionicons name="people-outline" size={30} color="rgba(255,255,255,0.18)" />
             <Text style={{ color: "rgba(255,255,255,0.35)", textAlign: "center", fontSize: 13 }}>
-              Sin jugadoras en el equipo aún.
+              Sin jugadores en el equipo aún.
             </Text>
           </View>
         ) : (

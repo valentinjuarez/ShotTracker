@@ -6,16 +6,16 @@ import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 
@@ -100,6 +100,14 @@ function usePressScale() {
   return { scale, onIn, onOut };
 }
 
+type WorkoutData = {
+  id: string;
+  title: string;
+  shot_type: string;
+  sessions_goal: number;
+  target_per_spot: number;
+};
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function SessionSummary() {
@@ -109,12 +117,17 @@ export default function SessionSummary() {
   const courtW = Math.min(width - (isSmall ? 32 : 40) - 32, 520);
   const courtH = Math.round(courtW * 1.08);
 
-  const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
+  const { sessionId, workoutId } = useLocalSearchParams<{ sessionId?: string; workoutId?: string }>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rows, setRows] = useState<SessionSpotRow[]>([]);
   const [mode, setMode] = useState<"HEAT" | "LIST">("HEAT");
   const [selectedSpotKey, setSelectedSpotKey] = useState<string | null>(null);
+
+  // ─── Workout mode state ───────────────────────────────────────────────────
+  const [workout, setWorkout]               = useState<WorkoutData | null>(null);
+  const [completedSessions, setCompletedSessions] = useState(0);
+  const [savingNext, setSavingNext]         = useState(false);
 
   const headerAnim  = useFadeSlide(0);
   const toggleAnim  = useFadeSlide(80);
@@ -153,6 +166,55 @@ export default function SessionSummary() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Load workout metadata + completed count when in workout mode
+  // completedSessions = session_number of the current session (reliable, no race condition)
+  useEffect(() => {
+    if (!workoutId) return;
+    (async () => {
+      const [{ data: wkData }, { data: sessData }] = await Promise.all([
+        supabase
+          .from("workouts")
+          .select("id, title, shot_type, sessions_goal, target_per_spot")
+          .eq("id", workoutId)
+          .single(),
+        supabase
+          .from("sessions")
+          .select("session_number")
+          .eq("id", sessionId ?? "")
+          .single(),
+      ]);
+      if (wkData) setWorkout(wkData as WorkoutData);
+      // session_number IS the completed count: session 1 finished = 1 done, session 3 finished = 3 done
+      setCompletedSessions(sessData?.session_number ?? 0);
+    })();
+  }, [workoutId, sessionId]);
+
+  // Create the next session of the workout and navigate to run screen
+  async function createNextSession() {
+    if (!workoutId || !workout) return;
+    try {
+      setSavingNext(true);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      const { data: rpcData, error: rpcErr } = await supabase
+        .rpc("create_next_workout_session", { p_workout_id: workoutId });
+      if (rpcErr) throw rpcErr;
+
+      const nextSessionId = (rpcData as any).session_id as string;
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace({
+        pathname: "/session/run",
+        params: { sessionId: nextSessionId, workoutId },
+      });
+    } catch (e: any) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert("Error", e?.message ?? "No se pudo iniciar la siguiente sesión.");
+    } finally {
+      setSavingNext(false);
+    }
+  }
 
   const stats = useMemo(() => {
     const totalAttempts = rows.reduce((acc, r) => acc + (r.attempts ?? 0), 0);
@@ -212,10 +274,12 @@ export default function SessionSummary() {
         <Animated.View style={[{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, headerAnim]}>
           <View style={{ gap: 3, flex: 1 }}>
             <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, letterSpacing: 1.4, textTransform: "uppercase" }}>
-              Resumen de sesión
+              {workout ? workout.title : "Resumen de sesión"}
             </Text>
             <Text style={{ color: "white", fontSize: 24, fontWeight: "900", letterSpacing: -0.5 }} numberOfLines={1}>
-              Análisis completo
+              {workout
+                ? `Sesión ${completedSessions} de ${workout.sessions_goal}`
+                : "Análisis completo"}
             </Text>
           </View>
           <SpringBtn onPress={() => router.replace("/")} onHaptic={() => onHaptic()}>
@@ -365,19 +429,72 @@ export default function SessionSummary() {
 
         {/* Bottom actions */}
         <Animated.View style={[{ gap: 10 }, actionsAnim]}>
-          {/* Primary CTA */}
-          <SpringBtn
-            onPress={async () => { await onHaptic(Haptics.ImpactFeedbackStyle.Medium); router.push("/session/create"); }}
-            onHaptic={() => onHaptic()}
-            style={{ height: 54, borderRadius: 18, backgroundColor: "#F59E0B",
-              alignItems: "center" as const, justifyContent: "center" as const, flexDirection: "row" as const, gap: 10 }}>
-            <Ionicons name="refresh" size={18} color="#0B1220" />
-            <Text style={{ color: "#0B1220", fontWeight: "900", fontSize: 15 }}>Nueva sesión</Text>
-          </SpringBtn>
 
-          {/* Secondary row */}
+          {/* ── Planilla completada ─────────────────────────────────────── */}
+          {workout && completedSessions >= workout.sessions_goal ? (
+            <View style={{
+              padding: 18, borderRadius: 20, gap: 12,
+              backgroundColor: "rgba(34,197,94,0.10)",
+              borderWidth: 1.5, borderColor: "rgba(34,197,94,0.35)",
+            }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <View style={{
+                  width: 44, height: 44, borderRadius: 13,
+                  backgroundColor: "rgba(34,197,94,0.18)",
+                  alignItems: "center", justifyContent: "center",
+                }}>
+                  <Ionicons name="trophy" size={24} color="rgba(34,197,94,1)" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: "rgba(34,197,94,1)", fontWeight: "900", fontSize: 16 }}>
+                    ¡Planilla completada! 🎉
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 12, marginTop: 2 }}>
+                    {workout.sessions_goal} sesiones · {workout.title}
+                  </Text>
+                </View>
+              </View>
+              <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 12, lineHeight: 17 }}>
+                Completaste todas las sesiones de esta planilla. Podés descargar el PDF o compartir con tu equipo.
+              </Text>
+            </View>
+          ) : null}
+
+          {/* ── Primary CTA ─────────────────────────────────────────────── */}
+          {workout && completedSessions < workout.sessions_goal ? (
+            /* Next workout session */
+            <SpringBtn
+              onPress={createNextSession}
+              onHaptic={() => onHaptic()}
+              style={{ height: 54, borderRadius: 18, backgroundColor: "#F59E0B",
+                alignItems: "center" as const, justifyContent: "center" as const,
+                flexDirection: "row" as const, gap: 10 }}>
+              {savingNext ? (
+                <ActivityIndicator color="#0B1220" />
+              ) : (
+                <>
+                  <Ionicons name="arrow-forward-circle" size={20} color="#0B1220" />
+                  <Text style={{ color: "#0B1220", fontWeight: "900", fontSize: 15 }}>
+                    Siguiente · Sesión {completedSessions + 1} de {workout.sessions_goal}
+                  </Text>
+                </>
+              )}
+            </SpringBtn>
+          ) : !workout ? (
+            /* Free session — new free session */
+            <SpringBtn
+              onPress={async () => { await onHaptic(Haptics.ImpactFeedbackStyle.Medium); router.push("/session/create"); }}
+              onHaptic={() => onHaptic()}
+              style={{ height: 54, borderRadius: 18, backgroundColor: "#F59E0B",
+                alignItems: "center" as const, justifyContent: "center" as const,
+                flexDirection: "row" as const, gap: 10 }}>
+              <Ionicons name="refresh" size={18} color="#0B1220" />
+              <Text style={{ color: "#0B1220", fontWeight: "900", fontSize: 15 }}>Nueva sesión</Text>
+            </SpringBtn>
+          ) : null}
+
+          {/* ── Secondary row: Home · PDF · Team ───────────────────────── */}
           <View style={{ flexDirection: "row", gap: 10 }}>
-            {/* Home — icon only */}
             <SpringBtn
               onPress={async () => { await onHaptic(); router.replace("/"); }}
               onHaptic={() => onHaptic()}
@@ -387,7 +504,6 @@ export default function SessionSummary() {
               <Ionicons name="home" size={20} color="rgba(255,255,255,0.9)" />
             </SpringBtn>
 
-            {/* Descargar PDF */}
             <SpringBtn
               onPress={async () => {
                 await onHaptic();
@@ -402,7 +518,6 @@ export default function SessionSummary() {
               <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "800", fontSize: 13 }}>PDF</Text>
             </SpringBtn>
 
-            {/* Mi equipo */}
             <SpringBtn
               onPress={async () => {
                 await onHaptic();
