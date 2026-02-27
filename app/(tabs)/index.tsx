@@ -5,15 +5,15 @@ import * as Haptics from "expo-haptics";
 import { Link, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Animated,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    View,
+    useWindowDimensions,
 } from "react-native";
 
 //  Animation hooks 
@@ -97,20 +97,45 @@ export default function Home() {
     try {
       setLoadingStats(true);
 
-      // Weekly sessions (last 7 days)
+      // Collect ALL session IDs that belong to this user:
+      // 1) free sessions created directly with user_id
+      // 2) workout sessions (linked via workout_id on the user's workouts)
       const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: weekSessions } = await supabase
-        .from("sessions")
-        .select("id")
-        .eq("user_id", userId)
-        .gte("started_at", since);
 
-      const weekIds = (weekSessions ?? []).map((s: any) => s.id);
-      if (weekIds.length > 0) {
+      const [{ data: userWorkouts }, { data: freeSessions }] = await Promise.all([
+        supabase.from("workouts").select("id").eq("user_id", userId),
+        supabase.from("sessions").select("id, started_at").eq("user_id", userId),
+      ]);
+      const workoutIds = (userWorkouts ?? []).map((w: any) => w.id as string);
+      let workoutSessionIds: string[] = [];
+      if (workoutIds.length > 0) {
+        const { data: wSess } = await supabase
+          .from("sessions").select("id, started_at").in("workout_id", workoutIds);
+        workoutSessionIds = (wSess ?? []).map((s: any) => s.id as string);
+      }
+      // Merge & deduplicate all session ids
+      const allSessionIds = [
+        ...new Set([
+          ...(freeSessions ?? []).map((s: any) => s.id as string),
+          ...workoutSessionIds,
+        ]),
+      ];
+
+      // Weekly sessions (last 7 days)
+      const { data: weekSessions } = allSessionIds.length > 0
+        ? await supabase
+            .from("sessions")
+            .select("id")
+            .in("id", allSessionIds)
+            .gte("started_at", since)
+        : { data: [] };
+
+      const weekSessionIds = (weekSessions ?? []).map((s: any) => s.id as string);
+      if (weekSessionIds.length > 0) {
         const { data: weekSpots } = await supabase
           .from("session_spots")
           .select("attempts, makes")
-          .in("session_id", weekIds);
+          .in("session_id", weekSessionIds);
         const spots = (weekSpots ?? []) as SpotAgg[];
         const totalAt = spots.reduce((a, s) => a + (s.attempts ?? 0), 0);
         const totalMk = spots.reduce((a, s) => a + (s.makes    ?? 0), 0);
@@ -121,13 +146,17 @@ export default function Home() {
         setWeeklyPct(null);
       }
 
-      // Last session (any status, most recent first)
-      const { data: sessions } = await supabase
-        .from("sessions")
-        .select("id, title, status, started_at, finished_at")
-        .eq("user_id", userId)
-        .order("started_at", { ascending: false })
-        .limit(1);
+      // Last session (any status, most recent first) — across free + workout sessions
+      // Use NULLS LAST so sessions without started_at (old workout sessions) don't float to top
+      const { data: sessions } = allSessionIds.length > 0
+        ? await supabase
+            .from("sessions")
+            .select("id, title, status, started_at, finished_at")
+            .in("id", allSessionIds)
+            .not("started_at", "is", null)
+            .order("started_at", { ascending: false })
+            .limit(1)
+        : { data: [] };
       const last = (sessions ?? [])[0] as SessionRow | undefined;
       if (last) {
         setLastSession(last);

@@ -3,6 +3,7 @@ import { useProfile } from "@/src/hooks/useProfile";
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -23,6 +24,7 @@ const card = {
 
 export default function CoachProfile() {
   const { profile, loading: profileLoading, refetch } = useProfile();
+  const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [teamStats, setTeamStats]   = useState<{
     players: number; totalSessions: number; totalAttempts: number; teamPct: number | null;
@@ -153,6 +155,8 @@ export default function CoachProfile() {
               }
               await supabase.from("team_members").delete().eq("user_id", userId);
               await supabase.from("profiles").delete().eq("id", userId);
+              // Eliminar el registro de autenticación (requerido por Apple)
+              await supabase.rpc("delete_own_auth_user");
               await supabase.auth.signOut();
             } catch {
               Alert.alert("Error", "No se pudo eliminar la cuenta.");
@@ -309,6 +313,20 @@ export default function CoachProfile() {
           <Ionicons name="trash-outline" size={16} color="rgba(239,68,68,0.40)" />
           <Text style={{ color: "rgba(239,68,68,0.40)", fontWeight: "700", fontSize: 13 }}>
             Eliminar cuenta
+          </Text>
+        </Pressable>
+
+        {/* Privacy policy */}
+        <Pressable
+          onPress={() => router.push("/privacy")}
+          style={{
+            flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+            paddingVertical: 8,
+          }}
+        >
+          <Ionicons name="shield-checkmark-outline" size={13} color="rgba(255,255,255,0.22)" />
+          <Text style={{ color: "rgba(255,255,255,0.25)", fontSize: 12 }}>
+            Política de privacidad
           </Text>
         </Pressable>
       </ScrollView>

@@ -2,6 +2,7 @@
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -27,6 +28,7 @@ const card = {
 } as const;
 
 export default function Profile() {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(true);
@@ -54,12 +56,24 @@ export default function Profile() {
       setEmail(auth.user?.email ?? "");
       if (!userId) return;
 
-      const { data: sessions } = await supabase
-        .from("sessions")
-        .select("id")
-        .eq("user_id", userId);
+      // Collect ALL session IDs: free sessions (user_id) + workout sessions (workout_id in user's workouts)
+      const { data: userWorkouts } = await supabase
+        .from("workouts").select("id").eq("user_id", userId);
+      const workoutIds = (userWorkouts ?? []).map((w: any) => w.id as string);
 
-      const ids = (sessions ?? []).map((s: any) => s.id);
+      const [{ data: freeSess }, { data: wkSess }] = await Promise.all([
+        supabase.from("sessions").select("id").eq("user_id", userId),
+        workoutIds.length > 0
+          ? supabase.from("sessions").select("id").in("workout_id", workoutIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const ids = [
+        ...new Set([
+          ...(freeSess ?? []).map((s: any) => s.id as string),
+          ...(wkSess  ?? []).map((s: any) => s.id as string),
+        ]),
+      ];
       setTotalSessions(ids.length);
 
       if (ids.length > 0) {
@@ -121,15 +135,36 @@ export default function Profile() {
               const { data: auth } = await supabase.auth.getUser();
               const userId = auth.user?.id;
               if (!userId) return;
-              const { data: sids } = await supabase.from("sessions").select("id").eq("user_id", userId);
-              const sessionIds = (sids ?? []).map((s: any) => s.id);
-              if (sessionIds.length > 0) {
-                await supabase.from("session_spots").delete().in("session_id", sessionIds);
+
+              // Delete spots for ALL sessions (free + workout)
+              const { data: userWorkouts } = await supabase
+                .from("workouts").select("id").eq("user_id", userId);
+              const workoutIds = (userWorkouts ?? []).map((w: any) => w.id as string);
+
+              const [{ data: freeSess }, { data: wkSess }] = await Promise.all([
+                supabase.from("sessions").select("id").eq("user_id", userId),
+                workoutIds.length > 0
+                  ? supabase.from("sessions").select("id").in("workout_id", workoutIds)
+                  : Promise.resolve({ data: [] as any[] }),
+              ]);
+              const allSessionIds = [
+                ...new Set([
+                  ...(freeSess ?? []).map((s: any) => s.id as string),
+                  ...(wkSess  ?? []).map((s: any) => s.id as string),
+                ]),
+              ];
+
+              if (allSessionIds.length > 0) {
+                await supabase.from("session_spots").delete().in("session_id", allSessionIds);
+                await supabase.from("sessions").delete().in("id", allSessionIds);
               }
-              await supabase.from("sessions").delete().eq("user_id", userId);
-              await supabase.from("workouts").delete().eq("user_id", userId);
+              if (workoutIds.length > 0) {
+                await supabase.from("workouts").delete().in("id", workoutIds);
+              }
               await supabase.from("team_members").delete().eq("user_id", userId);
               await supabase.from("profiles").delete().eq("id", userId);
+              // Eliminar el registro de autenticación (requerido por Apple)
+              await supabase.rpc("delete_own_auth_user");
               await supabase.auth.signOut();
             } catch {
               Alert.alert("Error", "No se pudo eliminar la cuenta.");
@@ -243,6 +278,20 @@ export default function Profile() {
           <Ionicons name="trash-outline" size={16} color="rgba(239,68,68,0.50)" />
           <Text style={{ color: "rgba(239,68,68,0.50)", fontWeight: "700", fontSize: 13 }}>
             Eliminar cuenta
+          </Text>
+        </Pressable>
+
+        {/* Privacy policy */}
+        <Pressable
+          onPress={() => router.push("/privacy")}
+          style={{
+            flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+            paddingVertical: 8,
+          }}
+        >
+          <Ionicons name="shield-checkmark-outline" size={13} color="rgba(255,255,255,0.22)" />
+          <Text style={{ color: "rgba(255,255,255,0.25)", fontSize: 12 }}>
+            Política de privacidad
           </Text>
         </Pressable>
       </ScrollView>

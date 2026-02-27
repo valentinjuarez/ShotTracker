@@ -46,6 +46,13 @@ export default function TrainerLayout() {
         }}
       />
       <Tabs.Screen
+        name="compare"
+        options={{
+          title: "Comparar",
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="person.2.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Perfil",

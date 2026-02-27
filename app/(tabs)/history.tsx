@@ -1,10 +1,12 @@
 // app/(tabs)/history.tsx
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Pressable,
     RefreshControl,
     SafeAreaView,
@@ -19,6 +21,7 @@ type SessionRow = {
   status: string;
   started_at: string | null;
   finished_at: string | null;
+  workout_id: string | null;
 };
 
 function pctColor(p: number) {
@@ -40,10 +43,31 @@ export default function History() {
       const userId = auth.user?.id;
       if (!userId) return;
 
+      // Get all session IDs: free sessions (user_id) + workout sessions (via workout_id)
+      const { data: userWorkouts } = await supabase
+        .from("workouts").select("id").eq("user_id", userId);
+      const workoutIds = (userWorkouts ?? []).map((w: any) => w.id as string);
+
+      const [{ data: freeSess }, { data: wkSess }] = await Promise.all([
+        supabase.from("sessions").select("id").eq("user_id", userId),
+        workoutIds.length > 0
+          ? supabase.from("sessions").select("id").in("workout_id", workoutIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+      const allIds = [
+        ...new Set([
+          ...(freeSess ?? []).map((s: any) => s.id as string),
+          ...(wkSess  ?? []).map((s: any) => s.id as string),
+        ]),
+      ];
+
+      if (!allIds.length) { setSessions([]); return; }
+
       const { data, error } = await supabase
         .from("sessions")
-        .select("id, title, status, started_at, finished_at")
-        .eq("user_id", userId)
+        .select("id, title, status, started_at, finished_at, workout_id")
+        .in("id", allIds)
+        .not("started_at", "is", null)
         .order("started_at", { ascending: false })
         .limit(50);
 
@@ -88,6 +112,35 @@ export default function History() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  function deleteSession(session: SessionRow) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const isWorkout = !!session.workout_id;
+    Alert.alert(
+      "Eliminar sesión",
+      isWorkout
+        ? "¿Eliminar esta sesión de la planilla? Esta acción no se puede deshacer."
+        : "¿Eliminar esta sesión y todos sus datos? Esta acción no se puede deshacer.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await supabase.from("session_spots").delete().eq("session_id", session.id);
+              await supabase.from("sessions").delete().eq("id", session.id);
+              setSessions((prev) => prev.filter((s) => s.id !== session.id));
+              setPcts((prev) => { const n = { ...prev }; delete n[session.id]; return n; });
+              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch {
+              Alert.alert("Error", "No se pudo eliminar la sesión.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
       <ScrollView
@@ -131,7 +184,10 @@ export default function History() {
             return (
               <Pressable
                 key={session.id}
-                onPress={() => router.push({ pathname: "/session/summary", params: { sessionId: session.id } })}
+                onPress={() => router.push({
+                  pathname: "/session/summary",
+                  params: { sessionId: session.id, ...(session.workout_id ? { workoutId: session.workout_id } : {}) },
+                })}
                 style={{
                   padding: 16, borderRadius: 18,
                   backgroundColor: "rgba(255,255,255,0.055)",
@@ -168,7 +224,21 @@ export default function History() {
                   )}
                 </View>
 
-                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.22)" />
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Pressable
+                    onPress={(e) => { e.stopPropagation(); deleteSession(session); }}
+                    hitSlop={10}
+                    style={{
+                      width: 32, height: 32, borderRadius: 10,
+                      backgroundColor: "rgba(239,68,68,0.08)",
+                      borderWidth: 1, borderColor: "rgba(239,68,68,0.20)",
+                      alignItems: "center", justifyContent: "center",
+                    }}
+                  >
+                    <Ionicons name="trash-outline" size={14} color="rgba(239,68,68,0.75)" />
+                  </Pressable>
+                  <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.22)" />
+                </View>
               </Pressable>
             );
           })

@@ -94,10 +94,17 @@ export default function RunSession() {
           setMakesDraft(rows[0]?.makes ?? 0);
         }
 
-        // opcional: marcar sesión IN_PROGRESS al entrar (si no lo hiciste antes)
+        // Marcar sesión IN_PROGRESS y asegurar que user_id / started_at estén cargados
+        // (las sesiones de planilla pueden no tenerlos si el RPC no los setea)
+        const { data: authSnap } = await supabase.auth.getUser();
+        const runUserId = authSnap.user?.id;
         await supabase
           .from("sessions")
-          .update({ status: "IN_PROGRESS" })
+          .update({
+            status: "IN_PROGRESS",
+            started_at: new Date().toISOString(),
+            ...(runUserId ? { user_id: runUserId } : {}),
+          })
           .eq("id", sessionId);
       } catch (e: any) {
         Alert.alert("Error", e?.message ?? "No se pudo cargar la sesión.");

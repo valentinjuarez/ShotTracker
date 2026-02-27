@@ -2,20 +2,23 @@
 import { ALL_SPOTS } from "@/src/data/spots";
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
+import { File } from "expo-file-system/next";
 import * as Haptics from "expo-haptics";
+import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Pressable,
-    RefreshControl,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    View,
-    useWindowDimensions,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  View,
+  useWindowDimensions,
 } from "react-native";
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 
@@ -108,6 +111,11 @@ type WorkoutData = {
   target_per_spot: number;
 };
 
+type PdfSessionRow = {
+  session_number: number;
+  spotRows: { spot_key: string; makes: number; attempts: number; target_attempts: number; order_index: number }[];
+};
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function SessionSummary() {
@@ -128,6 +136,8 @@ export default function SessionSummary() {
   const [workout, setWorkout]               = useState<WorkoutData | null>(null);
   const [completedSessions, setCompletedSessions] = useState(0);
   const [savingNext, setSavingNext]         = useState(false);
+  const [pdfLoading, setPdfLoading]         = useState(false);
+  const [shareLoading, setShareLoading]     = useState(false);
 
   const headerAnim  = useFadeSlide(0);
   const toggleAnim  = useFadeSlide(80);
@@ -170,7 +180,13 @@ export default function SessionSummary() {
   // Load workout metadata + completed count when in workout mode
   // completedSessions = session_number of the current session (reliable, no race condition)
   useEffect(() => {
-    if (!workoutId) return;
+    if (!workoutId) {
+      // Free session or navigated without workoutId — reset workout state to
+      // prevent stale data from a previous workout summary showing "Planilla completada"
+      setWorkout(null);
+      setCompletedSessions(0);
+      return;
+    }
     (async () => {
       const [{ data: wkData }, { data: sessData }] = await Promise.all([
         supabase
@@ -213,6 +229,137 @@ export default function SessionSummary() {
       Alert.alert("Error", e?.message ?? "No se pudo iniciar la siguiente sesión.");
     } finally {
       setSavingNext(false);
+    }
+  }
+
+  async function handlePdf() {
+    try {
+      setPdfLoading(true);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      let html: string;
+
+      if (workout && completedSessions >= workout.sessions_goal) {
+        // ── Planilla completada: buscar TODAS las sesiones ────────────────
+        const { data: allSess, error: sessErr } = await supabase
+          .from("sessions")
+          .select("id, session_number")
+          .eq("workout_id", workout.id)
+          .neq("status", "PENDING")
+          .order("session_number", { ascending: true });
+        if (sessErr) throw sessErr;
+
+        const sessIds = (allSess ?? []).map((s: any) => s.id as string);
+        const { data: allSpots, error: spotErr } = await supabase
+          .from("session_spots")
+          .select("session_id, spot_key, makes, attempts, target_attempts, order_index")
+          .in("session_id", sessIds);
+        if (spotErr) throw spotErr;
+
+        const sessMap = new Map<string, PdfSessionRow>();
+        (allSess ?? []).forEach((s: any) =>
+          sessMap.set(s.id, { session_number: s.session_number, spotRows: [] })
+        );
+        (allSpots ?? []).forEach((sp: any) =>
+          sessMap.get(sp.session_id)?.spotRows.push(sp)
+        );
+
+        const orderedSessions = Array.from(sessMap.values())
+          .sort((a, b) => a.session_number - b.session_number);
+
+        // Orden de spots tomado de la primera sesión
+        const firstSpots = (orderedSessions[0]?.spotRows ?? [])
+          .slice()
+          .sort((a, b) => a.order_index - b.order_index);
+        const spotOrder = firstSpots.map((s) => s.spot_key);
+
+        html = generateWorkoutHtml({ workout, orderedSessions, spotOrder, spotMetaByKey });
+      } else {
+        // ── Sesión libre ─────────────────────────────────────────────────
+        html = generateFreeSessionHtml({ rows, stats, spotMetaByKey });
+      }
+
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+
+      // Renombrar con el nombre del usuario
+      const { data: authData } = await supabase.auth.getUser();
+      const rawName: string = authData.user?.user_metadata?.display_name
+        ?? authData.user?.user_metadata?.username
+        ?? "jugador";
+      const safeName = rawName
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")  // quitar tildes
+        .replace(/\s+/g, "_")
+        .replace(/[^a-zA-Z0-9_]/g, "")
+        .slice(0, 32) || "jugador";
+      const suffix = workout ? `_${workout.title.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 24)}` : "";
+      const dir = uri.substring(0, uri.lastIndexOf("/") + 1);
+      const newUri = `${dir}Planilla_${safeName}${suffix}.pdf`;
+      const dest = new File(newUri);
+      if (dest.exists) dest.delete();
+      new File(uri).move(dest);
+
+      await Sharing.shareAsync(newUri, { mimeType: "application/pdf", dialogTitle: "Exportar PDF", UTI: "com.adobe.pdf" });
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "No se pudo generar el PDF.");
+    } finally {
+      setPdfLoading(false);
+    }
+  }
+
+  async function handleShareTeam() {
+    if (!workout) return;
+    try {
+      setShareLoading(true);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth.user?.id;
+      if (!userId) return;
+
+      // Equipo del jugador
+      const { data: membership } = await supabase
+        .from("team_members")
+        .select("team_id")
+        .eq("user_id", userId)
+        .eq("role", "player")
+        .maybeSingle();
+
+      if (!membership) {
+        Alert.alert("Sin equipo", "No estás unido a ningún equipo todavía.");
+        return;
+      }
+      const teamId = (membership as any).team_id as string;
+
+      // ¿Ya compartida?
+      const { data: existing } = await supabase
+        .from("team_workouts")
+        .select("id")
+        .eq("workout_id", workout.id)
+        .eq("team_id", teamId)
+        .maybeSingle();
+
+      if (existing) {
+        Alert.alert("Ya compartida", "Esta planilla ya fue compartida con tu equipo.");
+        return;
+      }
+
+      await supabase.from("team_workouts").insert({
+        workout_id:     workout.id,
+        team_id:        teamId,
+        user_id:        userId,
+        workout_title:  workout.title,
+        workout_status: "COMPLETED",
+        shot_type:      workout.shot_type,
+        sessions_goal:  workout.sessions_goal,
+        shared_at:      new Date().toISOString(),
+      });
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("¡Compartida! 🎉", "Tu planilla fue compartida con el equipo. El entrenador ya puede verla.");
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "No se pudo compartir con el equipo.");
+    } finally {
+      setShareLoading(false);
     }
   }
 
@@ -493,8 +640,9 @@ export default function SessionSummary() {
             </SpringBtn>
           ) : null}
 
-          {/* ── Secondary row: Home · PDF · Team ───────────────────────── */}
+          {/* ── Secondary row: Home · PDF (condicional) · Mi equipo (solo planillas) ── */}
           <View style={{ flexDirection: "row", gap: 10 }}>
+            {/* Home */}
             <SpringBtn
               onPress={async () => { await onHaptic(); router.replace("/"); }}
               onHaptic={() => onHaptic()}
@@ -504,38 +652,391 @@ export default function SessionSummary() {
               <Ionicons name="home" size={20} color="rgba(255,255,255,0.9)" />
             </SpringBtn>
 
-            <SpringBtn
-              onPress={async () => {
-                await onHaptic();
-                Alert.alert("Próximamente", "La exportación a PDF estará disponible en la próxima versión.");
-              }}
-              onHaptic={() => onHaptic()}
-              style={{ flex: 1, height: 54, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.06)",
-                borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
-                alignItems: "center" as const, justifyContent: "center" as const,
-                flexDirection: "row" as const, gap: 8 }}>
-              <Ionicons name="document-text" size={17} color="rgba(255,255,255,0.75)" />
-              <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "800", fontSize: 13 }}>PDF</Text>
-            </SpringBtn>
+            {/* PDF — sesión libre: siempre. Planilla: solo al completar */}
+            {(!workout || completedSessions >= workout.sessions_goal) && (
+              <SpringBtn
+                onPress={handlePdf}
+                onHaptic={() => onHaptic()}
+                style={{ flex: 1, height: 54, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.06)",
+                  borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+                  alignItems: "center" as const, justifyContent: "center" as const,
+                  flexDirection: "row" as const, gap: 8 }}>
+                {pdfLoading ? (
+                  <ActivityIndicator color="rgba(255,255,255,0.75)" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="document-text" size={17} color="rgba(255,255,255,0.75)" />
+                    <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "800", fontSize: 13 }}>PDF</Text>
+                  </>
+                )}
+              </SpringBtn>
+            )}
 
-            <SpringBtn
-              onPress={async () => {
-                await onHaptic();
-                Alert.alert("Próximamente", "La función de compartir con tu equipo estará disponible pronto.");
-              }}
-              onHaptic={() => onHaptic()}
-              style={{ flex: 1, height: 54, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.06)",
-                borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
-                alignItems: "center" as const, justifyContent: "center" as const,
-                flexDirection: "row" as const, gap: 8 }}>
-              <Ionicons name="people" size={17} color="rgba(255,255,255,0.75)" />
-              <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "800", fontSize: 13 }}>Mi equipo</Text>
-            </SpringBtn>
+            {/* Mi equipo — solo cuando la planilla está completada */}
+            {workout && completedSessions >= workout.sessions_goal && (
+              <SpringBtn
+                onPress={handleShareTeam}
+                onHaptic={() => onHaptic()}
+                style={{ flex: 1, height: 54, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.06)",
+                  borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+                  alignItems: "center" as const, justifyContent: "center" as const,
+                  flexDirection: "row" as const, gap: 8 }}>
+                {shareLoading ? (
+                  <ActivityIndicator color="rgba(255,255,255,0.75)" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="people" size={17} color="rgba(255,255,255,0.75)" />
+                    <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "800", fontSize: 13 }}>Mi equipo</Text>
+                  </>
+                )}
+              </SpringBtn>
+            )}
           </View>
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+// ─── PDF: court SVG helper ───────────────────────────────────────────────────
+
+function buildCourtSvgHtml(
+  spots: typeof ALL_SPOTS,
+  aggregateMap: Map<string, { makes: number; attempts: number }>,
+): string {
+  const W = 240, H = 256;
+  const L = 10, R = 230, T = 8, B = 246;
+  const cW = R - L, cH = B - T;          // 220 × 238
+  const rimX = L + cW * 0.5;             // 120
+  const rimY = T + cH * 0.11;            // ~34.2
+  const keyW = cW * 0.40;                // 88
+  const keyH = cH * 0.36;               // ~85.7
+  const keyX = rimX - keyW / 2;          // 76
+  const keyY = T;                        // 8
+  const ftY  = keyY + keyH;             // ~93.7
+  const ftR  = keyW * 0.30;             // 26.4
+  const cXL  = L  + cW * 0.12;          // ~36.4
+  const cXR  = R  - cW * 0.12;          // ~203.6
+  const tR   = cW * 0.382;              // ~84.0
+  const dxC  = rimX - cXL;
+  const cbY  = rimY + Math.sqrt(Math.max(tR * tR - dxC * dxC, 0));
+
+  function polar(cx: number, cy: number, r: number, deg: number): [number, number] {
+    const a = ((deg - 90) * Math.PI) / 180;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  }
+  function toAngle(cx: number, cy: number, x: number, y: number) {
+    return (Math.atan2(y - cy, x - cx) * 180) / Math.PI + 90;
+  }
+  function arc(cx: number, cy: number, r: number, sa: number, ea: number, cw = true): string {
+    const [sx, sy] = polar(cx, cy, r, ea);
+    const [ex, ey] = polar(cx, cy, r, sa);
+    const ns = ((sa % 360) + 360) % 360, ne = ((ea % 360) + 360) % 360;
+    const delta = cw ? (ne - ns + 360) % 360 : (ns - ne + 360) % 360;
+    const large = delta > 180 ? 1 : 0;
+    return `M${sx.toFixed(1)},${sy.toFixed(1)} A${r.toFixed(1)},${r.toFixed(1)} 0 ${large} ${cw ? 1 : 0} ${ex.toFixed(1)},${ey.toFixed(1)}`;
+  }
+
+  const sa3    = toAngle(rimX, rimY, cXL, cbY);
+  const ea3    = toAngle(rimX, rimY, cXR, cbY);
+  const ftArc  = arc(rimX, ftY, ftR, 270, 90, true);
+  const threeA = arc(rimX, rimY, tR, sa3, ea3, true);
+  const bk1 = rimX - keyW * 0.20, bk2 = rimX + keyW * 0.20;
+  const rimLine = rimY - 12;
+
+  function spotColor(p: number) {
+    return p >= 0.65 ? "#22C55E" : p >= 0.40 ? "#F59E0B" : "#EF4444";
+  }
+
+  const spotSvg = spots.map((s) => {
+    const cx = (L + s.x * cW).toFixed(1);
+    const cyN = T + s.y * cH;
+    const cy  = cyN.toFixed(1);
+    const agg = aggregateMap.get(s.id);
+    const hasPct = !!agg && agg.attempts > 0;
+    const pct  = hasPct ? agg!.makes / agg!.attempts : 0;
+    const color = hasPct ? spotColor(pct) : "#94a3b8";
+    const opacity = hasPct ? "0.30" : "0.12";
+    return [
+      `<circle cx="${cx}" cy="${cy}" r="12" fill="${color}" fill-opacity="${opacity}" stroke="${color}" stroke-width="1.8"/>`,
+      `<text x="${cx}" y="${(cyN + 4).toFixed(1)}" text-anchor="middle" fill="${color}" font-size="9" font-weight="800" font-family="-apple-system,sans-serif">${s.label}</text>`,
+    ].join("");
+  }).join("\n  ");
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" style="display:block;">
+  <rect x="${L}" y="${T}" width="${cW}" height="${cH}" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5" rx="8"/>
+  <rect x="${keyX.toFixed(1)}" y="${keyY}" width="${keyW.toFixed(1)}" height="${keyH.toFixed(1)}" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1.2"/>
+  <line x1="${keyX.toFixed(1)}" y1="${ftY.toFixed(1)}" x2="${(keyX+keyW).toFixed(1)}" y2="${ftY.toFixed(1)}" stroke="#e2e8f0" stroke-width="1.2"/>
+  <path d="${ftArc}" fill="none" stroke="#e2e8f0" stroke-width="1.2"/>
+  <line x1="${bk1.toFixed(1)}" y1="${rimLine.toFixed(1)}" x2="${bk2.toFixed(1)}" y2="${rimLine.toFixed(1)}" stroke="#94a3b8" stroke-width="2"/>
+  <circle cx="${rimX.toFixed(1)}" cy="${rimY.toFixed(1)}" r="5" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+  <line x1="${cXL.toFixed(1)}" y1="${T}" x2="${cXL.toFixed(1)}" y2="${cbY.toFixed(1)}" stroke="#F59E0B" stroke-opacity="0.45" stroke-width="1.2"/>
+  <line x1="${cXR.toFixed(1)}" y1="${T}" x2="${cXR.toFixed(1)}" y2="${cbY.toFixed(1)}" stroke="#F59E0B" stroke-opacity="0.45" stroke-width="1.2"/>
+  <path d="${threeA}" fill="none" stroke="#F59E0B" stroke-opacity="0.45" stroke-width="1.2"/>
+  ${spotSvg}
+</svg>`;
+}
+
+// ─── PDF: workout grid ────────────────────────────────────────────────────────
+
+function generateWorkoutHtml({
+  workout,
+  orderedSessions,
+  spotOrder,
+  spotMetaByKey,
+}: {
+  workout: WorkoutData;
+  orderedSessions: PdfSessionRow[];
+  spotOrder: string[];
+  spotMetaByKey: Map<string, { label: string } | undefined>;
+}): string {
+  const date = new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" });
+
+  // Aggregate per spot across all sessions
+  const aggMap = new Map<string, { makes: number; attempts: number }>();
+  orderedSessions.forEach((sess) =>
+    sess.spotRows.forEach((sp) => {
+      const a = aggMap.get(sp.spot_key) ?? { makes: 0, attempts: 0 };
+      a.makes += sp.makes; a.attempts += sp.attempts;
+      aggMap.set(sp.spot_key, a);
+    })
+  );
+
+  let totalMakes = 0, totalAttempts = 0;
+  aggMap.forEach((a) => { totalMakes += a.makes; totalAttempts += a.attempts; });
+  const overallPct = totalAttempts > 0 ? Math.round(totalMakes / totalAttempts * 100) : 0;
+  const overallColor = overallPct >= 65 ? "#16a34a" : overallPct >= 40 ? "#d97706" : "#dc2626";
+
+  // Spots filtered to only those in this workout, in order
+  const spotsFiltered = ALL_SPOTS.filter((s) => spotOrder.includes(s.id))
+    .sort((a, b) => spotOrder.indexOf(a.id) - spotOrder.indexOf(b.id));
+
+  const courtSvg = buildCourtSvgHtml(spotsFiltered, aggMap);
+
+  function cellColor(p: number) {
+    return p >= 0.65 ? "#16a34a" : p >= 0.40 ? "#d97706" : "#dc2626";
+  }
+
+  // Column headers: sequential number with full label as tooltip
+  const spotHeaders = spotOrder.map((key, i) => {
+    const spot = ALL_SPOTS.find((s) => s.id === key);
+    const tip = spotMetaByKey.get(key)?.label ?? key;
+    const shortType = spot?.shotType === "3PT" ? "3" : "2";
+    return `<th title="${tip}">${shortType}·${spot?.label ?? i + 1}</th>`;
+  }).join("");
+
+  // Table body: one row per session
+  const tableRows = orderedSessions.map((sess) => {
+    const spotMap = new Map(sess.spotRows.map((sp) => [sp.spot_key, sp]));
+    let sessMakes = 0, sessAttempts = 0, sessTarget = 0;
+    spotOrder.forEach((k) => {
+      const sp = spotMap.get(k);
+      if (sp) { sessMakes += sp.makes; sessAttempts += sp.attempts; sessTarget += sp.target_attempts; }
+    });
+    const sessPct = sessAttempts > 0 ? sessMakes / sessAttempts : 0;
+  const spotCells = spotOrder.map((k) => {
+      const sp = spotMap.get(k);
+      if (!sp || sp.attempts === 0) return `<td class="spot-cell" style="color:#94a3b8">—</td>`;
+      const p = sp.makes / sp.attempts;
+      const color = cellColor(p);
+      return `<td class="spot-cell">
+        <span class="sub">${sp.makes}/${sp.target_attempts}</span><br/>
+        <span class="pct" style="color:${color}">${Math.round(p * 100)}%</span>
+      </td>`;
+    }).join("");
+    const totalPctStr = sessAttempts > 0 ? `${Math.round(sessPct * 100)}%` : "—";
+    const totalCell = `<td class="total-col">
+      <span class="sub">${sessMakes}/${sessTarget}</span><br/>
+      <span class="pct" style="color:${cellColor(sessPct)}">${totalPctStr}</span>
+    </td>`;
+    return `<tr>
+      <td class="row-head">S${sess.session_number}</td>
+      ${spotCells}
+      ${totalCell}
+    </tr>`;
+  }).join("");
+
+  // Footer total row
+  const footerSpotCells = spotOrder.map((k) => {
+    const a = aggMap.get(k);
+    if (!a || a.attempts === 0) return `<td class="spot-cell footer-cell">—</td>`;
+    const p = a.makes / a.attempts;
+    return `<td class="spot-cell footer-cell">
+      <span class="sub">${a.makes}/${a.attempts}</span><br/>
+      <span class="pct" style="color:${cellColor(p)}">${Math.round(p * 100)}%</span>
+    </td>`;
+  }).join("");
+  const footerTotalCell = `<td class="total-col footer-cell" style="background:#f0fdf4">
+    <span class="sub">${totalMakes}/${totalAttempts}</span><br/>
+    <span style="font-size:11px;font-weight:900;color:${overallColor}">${overallPct}%</span>
+  </td>`;
+  const footerRow = `<tr class="footer-row">
+    <td class="row-head" style="color:#0f172a">TOTAL</td>
+    ${footerSpotCells}
+    ${footerTotalCell}
+  </tr>`;
+
+  return `<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8"/>
+  <title>ShotTracker — ${workout.title}</title>
+  <style>
+    @page{size:A4 landscape;margin:14mm 12mm}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#fff;color:#1e293b;font-size:10px}
+    .page{width:100%;padding:0}
+    .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #e2e8f0}
+    .brand{font-size:11px;font-weight:900;letter-spacing:3px;color:#64748b;text-transform:uppercase}
+    .date{font-size:10px;color:#94a3b8}
+    .badge{display:inline-block;background:#dcfce7;color:#16a34a;font-weight:700;font-size:10px;padding:2px 8px;border-radius:20px;margin-bottom:6px}
+    .title{font-size:17px;font-weight:900;color:#0f172a;letter-spacing:-.4px;margin-bottom:2px}
+    .subtitle{font-size:10px;color:#64748b;margin-bottom:10px}
+    .two-col{display:flex;gap:14px;align-items:flex-start;margin-bottom:12px}
+    .stats-col{flex:1}
+    .stats-row{display:flex;gap:8px}
+    .stat-card{flex:1;padding:8px;border-radius:8px;background:#f8fafc;border:1.5px solid #e2e8f0;text-align:center}
+    .stat-label{font-size:8px;color:#94a3b8;font-weight:700;letter-spacing:.4px;text-transform:uppercase;margin-bottom:2px}
+    .stat-value{font-size:17px;font-weight:900;color:#0f172a}
+    .court-col{flex-shrink:0}
+    .section-title{font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+    .legend{display:flex;gap:10px;margin-bottom:8px;align-items:center}
+    .legend-item{display:flex;align-items:center;gap:4px;font-size:9px;color:#64748b}
+    .legend-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+    table{border-collapse:collapse;background:white;border:1.5px solid #e2e8f0;width:100%;table-layout:fixed}
+    thead tr{background:#f1f5f9}
+    th{padding:4px 3px;text-align:center;font-size:8px;font-weight:700;color:#64748b;text-transform:uppercase;border-bottom:1.5px solid #e2e8f0;white-space:nowrap;overflow:hidden}
+    th:first-child{text-align:left;padding-left:6px;width:28px}
+    td{padding:4px 3px;border-bottom:1px solid #f1f5f9;vertical-align:middle;text-align:center;overflow:hidden}
+    td:first-child{padding-left:6px}
+    tr:last-child td{border-bottom:none}
+    .spot-cell{text-align:center;line-height:1.35}
+    .total-col{text-align:center;background:#f8fafc;border-left:1.5px solid #e2e8f0;line-height:1.35;width:42px}
+    .row-head{font-weight:700;color:#1e293b;white-space:nowrap;text-align:left;font-size:9px}
+    .sub{font-size:8px;color:#64748b;font-weight:600;display:block}
+    .pct{font-size:10px;font-weight:900;display:block}
+    .footer-cell{background:#f8fafc}
+    .footer-row{border-top:2px solid #e2e8f0}
+    .footer{text-align:center;font-size:9px;color:#94a3b8;padding-top:8px;margin-top:10px;border-top:1px solid #e2e8f0}
+  </style>
+</head><body>
+  <div class="page">
+    <div class="header"><span class="brand">ShotTracker</span><span class="date">${date}</span></div>
+    <div class="badge">Planilla completada · ${workout.sessions_goal} sesiones</div>
+    <div class="title">${workout.title}</div>
+    <div class="subtitle">${workout.shot_type} · ${workout.sessions_goal} sesiones · ${date}</div>
+    <div class="two-col">
+      <div class="stats-col">
+        <div class="section-title" style="margin-bottom:6px">Resumen global</div>
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-label">Metidos</div><div class="stat-value">${totalMakes}</div></div>
+          <div class="stat-card"><div class="stat-label">Intentos</div><div class="stat-value">${totalAttempts}</div></div>
+          <div class="stat-card"><div class="stat-label">Promedio</div><div class="stat-value" style="color:${overallColor}">${overallPct}%</div></div>
+        </div>
+        <div style="margin-top:10px">
+          <div class="section-title">Referencias de color</div>
+          <div class="legend">
+            <div class="legend-item"><span class="legend-dot" style="background:#22C55E"></span>&ge;65% bueno</div>
+            <div class="legend-item"><span class="legend-dot" style="background:#F59E0B"></span>40–64% regular</div>
+            <div class="legend-item"><span class="legend-dot" style="background:#EF4444"></span>&lt;40% a mejorar</div>
+          </div>
+        </div>
+      </div>
+      <div class="court-col">
+        <div class="section-title">Mapa de spots — color = % promedio global</div>
+        ${courtSvg}
+      </div>
+    </div>
+    <div class="section-title">Cuadrícula: sesión (filas) × spot (columnas)</div>
+    <table>
+      <thead><tr><th>Ses.</th>${spotHeaders}<th style="border-left:1.5px solid #e2e8f0;width:42px">Total</th></tr></thead>
+      <tbody>${tableRows}${footerRow}</tbody>
+    </table>
+    <div class="footer">Generado con ShotTracker · ${date} · cabeceras: tipo·número (3=3PT, 2=2PT)</div>
+  </div>
+</body></html>`;
+}
+
+// ─── PDF: free session ────────────────────────────────────────────────────────
+
+function generateFreeSessionHtml({
+  rows,
+  stats,
+  spotMetaByKey,
+}: {
+  rows: SessionSpotRow[];
+  stats: { totalMakes: number; totalAttempts: number; pct: number };
+  spotMetaByKey: Map<string, { label: string } | undefined>;
+}): string {
+  const date = new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" });
+  const pct = Math.round(stats.pct * 100);
+  const pctColor = pct >= 65 ? "#16a34a" : pct >= 40 ? "#d97706" : "#dc2626";
+
+  const spotsRows = rows
+    .slice()
+    .sort((a, b) => (b.attempts > 0 ? b.makes / b.attempts : 0) - (a.attempts > 0 ? a.makes / a.attempts : 0))
+    .map((r) => {
+      const label = spotMetaByKey.get(r.spot_key)?.label ?? r.spot_key;
+      const p = r.attempts > 0 ? Math.round((r.makes / r.attempts) * 100) : 0;
+      const barColor = p >= 65 ? "#22C55E" : p >= 40 ? "#F59E0B" : "#EF4444";
+      return `<tr>
+        <td>${label}</td>
+        <td style="color:#64748b">${r.shot_type}</td>
+        <td style="text-align:center;font-weight:700">${r.makes}</td>
+        <td style="text-align:center;font-weight:700">${r.attempts}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="flex:1;height:8px;border-radius:4px;background:#e5e7eb;overflow:hidden">
+              <div style="width:${p}%;height:100%;background:${barColor};border-radius:4px"></div>
+            </div>
+            <span style="font-weight:700;color:${barColor};min-width:36px;text-align:right">${p}%</span>
+          </div>
+        </td>
+      </tr>`;
+    }).join("");
+
+  return `<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8"/>
+  <title>ShotTracker — Sesión libre</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b}
+    .page{max-width:700px;margin:0 auto;padding:32px 24px}
+    .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding-bottom:18px;border-bottom:2px solid #e2e8f0}
+    .brand{font-size:13px;font-weight:900;letter-spacing:3px;color:#64748b;text-transform:uppercase}
+    .date{font-size:12px;color:#94a3b8}
+    .title{font-size:26px;font-weight:900;color:#0f172a;letter-spacing:-.5px;margin-bottom:4px}
+    .subtitle{font-size:14px;color:#64748b;margin-bottom:24px}
+    .stats-row{display:flex;gap:14px;margin-bottom:24px}
+    .stat-card{flex:1;padding:14px;border-radius:12px;background:white;border:1.5px solid #e2e8f0;text-align:center}
+    .stat-label{font-size:11px;color:#94a3b8;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px}
+    .stat-value{font-size:26px;font-weight:900;color:#0f172a}
+    .section-title{font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+    table{width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;border:1.5px solid #e2e8f0;margin-bottom:24px}
+    thead tr{background:#f8fafc}
+    th{padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:1.5px solid #e2e8f0}
+    td{padding:11px 14px;font-size:13px;color:#334155;border-bottom:1px solid #f1f5f9}
+    tr:last-child td{border-bottom:none}
+    .footer{text-align:center;font-size:11px;color:#94a3b8;padding-top:16px;border-top:1px solid #e2e8f0}
+  </style>
+</head><body>
+  <div class="page">
+    <div class="header"><span class="brand">ShotTracker</span><span class="date">${date}</span></div>
+    <div class="title">Sesión libre</div>
+    <div class="subtitle">Análisis de tiros · ${date}</div>
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">Metidos</div><div class="stat-value">${stats.totalMakes}</div></div>
+      <div class="stat-card"><div class="stat-label">Intentos</div><div class="stat-value">${stats.totalAttempts}</div></div>
+      <div class="stat-card"><div class="stat-label">Promedio</div><div class="stat-value" style="color:${pctColor}">${pct}%</div></div>
+    </div>
+    <div class="section-title">Rendimiento por spot</div>
+    <table>
+      <thead><tr><th>Spot</th><th>Tipo</th><th style="text-align:center">Met.</th><th style="text-align:center">Int.</th><th>%</th></tr></thead>
+      <tbody>${spotsRows}</tbody>
+    </table>
+    <div class="footer">Generado con ShotTracker · ${date}</div>
+  </div>
+</body></html>`;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -139,6 +139,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading]   = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const router = useRouter();
 
   const anims = {
     logo:   useRef(new Animated.Value(0)).current,
@@ -250,6 +251,15 @@ export default function Login() {
               placeholder="••••••••" secureTextEntry error={passError}
               textContentType="password" enterAnim={anims.f2} />
           </View>
+
+          {/* Forgot password */}
+          <Animated.View style={{ alignItems: "flex-end", marginTop: 6, marginBottom: 4, opacity: anims.f2 }}>
+            <Pressable onPress={() => router.push("/(auth)/forgot-password")} hitSlop={8}>
+              <Text style={{ color: "rgba(245,158,11,0.70)", fontSize: 13, fontWeight: "700" }}>
+                ¿Olvidaste tu contraseña?
+              </Text>
+            </Pressable>
+          </Animated.View>
 
           {/* Auth error banner */}
           {authError ? (

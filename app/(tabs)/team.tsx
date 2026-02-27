@@ -8,6 +8,7 @@ import {
   Alert,
   Animated,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -48,6 +49,10 @@ const card = {
   backgroundColor: "rgba(255,255,255,0.055)",
   borderWidth: 1, borderColor: "rgba(255,255,255,0.09)",
 } as const;
+
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -610,21 +615,206 @@ function MemberRow({ member, isMe }: { member: MemberRow; isMe: boolean }) {
 }
 
 function SharedSection({ team, userId }: { team: Team; userId: string | null }) {
-  const [workouts, setWorkouts]   = useState<{ id: string; title: string; status: string }[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [sharing, setSharing]     = useState<string | null>(null);
+  const [sharedWorkouts, setSharedWorkouts] = useState<{ id: string; title: string; status: string }[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [showPicker, setShowPicker] = useState(false);
+
+  const loadShared = useCallback(async () => {
+    if (!userId) return;
+    try {
+      setLoading(true);
+      // Load only workouts already shared with THIS team
+      const { data } = await supabase
+        .from("team_workouts")
+        .select("workout_id, workouts(id, title, status)")
+        .eq("team_id", team.id)
+        .eq("user_id", userId);
+      const rows = (data ?? []).map((r: any) => r.workouts).filter(Boolean);
+      setSharedWorkouts(rows as any[]);
+    } catch {
+      setSharedWorkouts([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, team.id]);
+
+  useEffect(() => { loadShared(); }, [loadShared]);
+
+  return (
+    <View style={[card, { gap: 16 }]}>
+      {/* Header row */}
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={{ color: "white", fontWeight: "900", fontSize: 15, letterSpacing: -0.2 }}>
+            Planillas compartidas
+          </Text>
+          <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 13 }}>
+            Visibles para tu entrenador/a.
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => setShowPicker(true)}
+          style={{
+            flexDirection: "row", alignItems: "center", gap: 6,
+            paddingVertical: 8, paddingHorizontal: 14, borderRadius: 12,
+            backgroundColor: "rgba(99,179,237,0.15)",
+            borderWidth: 1, borderColor: "rgba(99,179,237,0.30)",
+          }}
+        >
+          <Ionicons name="share-outline" size={14} color="rgba(99,179,237,0.90)" />
+          <Text style={{ color: "rgba(99,179,237,0.90)", fontWeight: "800", fontSize: 13 }}>
+            Compartir
+          </Text>
+        </Pressable>
+      </View>
+
+      {loading ? (
+        <ActivityIndicator color="#F59E0B" style={{ alignSelf: "flex-start" }} />
+      ) : sharedWorkouts.length === 0 ? (
+        <View style={{
+          alignItems: "center", gap: 8, paddingVertical: 18,
+          borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)",
+          borderStyle: "dashed", backgroundColor: "rgba(255,255,255,0.02)",
+        }}>
+          <Ionicons name="clipboard-outline" size={24} color="rgba(255,255,255,0.18)" />
+          <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
+            Todavía no compartiste ninguna planilla.
+          </Text>
+        </View>
+      ) : (
+        <View style={{ gap: 8 }}>
+          {sharedWorkouts.map((w) => (
+            <SharedWorkoutRow
+              key={w.id}
+              workout={w}
+              teamId={team.id}
+              userId={userId}
+              onUnshared={loadShared}
+            />
+          ))}
+        </View>
+      )}
+
+      {showPicker && (
+        <SharePickerModal
+          team={team}
+          userId={userId}
+          alreadyShared={sharedWorkouts.map((w) => w.id)}
+          onClose={() => setShowPicker(false)}
+          onShared={loadShared}
+        />
+      )}
+    </View>
+  );
+}
+
+function SharedWorkoutRow({
+  workout, teamId, userId, onUnshared,
+}: {
+  workout: { id: string; title: string; status: string };
+  teamId: string;
+  userId: string | null;
+  onUnshared: () => void;
+}) {
+  const [unsharing, setUnsharing] = useState(false);
+
+  function confirmUnshare() {
+    Alert.alert(
+      "Dejar de compartir",
+      `¿Querés dejar de compartir "${workout.title}" con el equipo?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Dejar de compartir", style: "destructive", onPress: doUnshare },
+      ]
+    );
+  }
+
+  async function doUnshare() {
+    if (!userId) return;
+    try {
+      setUnsharing(true);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await supabase
+        .from("team_workouts")
+        .delete()
+        .eq("team_id", teamId)
+        .eq("workout_id", workout.id)
+        .eq("user_id", userId);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onUnshared();
+    } catch {
+      Alert.alert("Error", "No se pudo dejar de compartir. Intentá de nuevo.");
+    } finally {
+      setUnsharing(false);
+    }
+  }
+
+  return (
+    <View style={{
+      flexDirection: "row", alignItems: "center", gap: 12,
+      padding: 12, borderRadius: 14,
+      backgroundColor: "rgba(34,197,94,0.05)",
+      borderWidth: 1, borderColor: "rgba(34,197,94,0.18)",
+    }}>
+      <View style={{
+        width: 38, height: 38, borderRadius: 11,
+        backgroundColor: "rgba(34,197,94,0.10)",
+        borderWidth: 1, borderColor: "rgba(34,197,94,0.22)",
+        alignItems: "center", justifyContent: "center",
+      }}>
+        <Ionicons name="checkmark-circle-outline" size={18} color="rgba(34,197,94,0.70)" />
+      </View>
+      <Text style={{ flex: 1, color: "white", fontWeight: "800", fontSize: 14 }} numberOfLines={1}>
+        {workout.title}
+      </Text>
+      <View style={{
+        paddingVertical: 3, paddingHorizontal: 8, borderRadius: 999,
+        backgroundColor: "rgba(34,197,94,0.10)",
+        borderWidth: 1, borderColor: "rgba(34,197,94,0.22)",
+      }}>
+        <Text style={{ color: "rgba(34,197,94,0.80)", fontWeight: "800", fontSize: 11 }}>Compartida</Text>
+      </View>
+      <Pressable
+        onPress={confirmUnshare}
+        disabled={unsharing}
+        style={{
+          width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center",
+          backgroundColor: "rgba(239,68,68,0.08)",
+          borderWidth: 1, borderColor: "rgba(239,68,68,0.22)",
+          marginLeft: 4,
+        }}
+      >
+        {unsharing
+          ? <ActivityIndicator size="small" color="rgba(239,68,68,0.70)" />
+          : <Ionicons name="trash-outline" size={15} color="rgba(239,68,68,0.70)" />
+        }
+      </Pressable>
+    </View>
+  );
+}
+
+function SharePickerModal({
+  team, userId, alreadyShared, onClose, onShared,
+}: {
+  team: Team;
+  userId: string | null;
+  alreadyShared: string[];
+  onClose: () => void;
+  onShared: () => void;
+}) {
+  const [workouts, setWorkouts] = useState<{ id: string; title: string; status: string; shot_type: string; sessions_goal: number; created_at: string }[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [sharing, setSharing]   = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       if (!userId) return;
       try {
-        // Load user's workouts to allow sharing
         const { data } = await supabase
           .from("workouts")
-          .select("id, title, status")
+          .select("id, title, status, shot_type, sessions_goal, created_at")
           .eq("user_id", userId)
-          .order("created_at", { ascending: false })
-          .limit(20);
+          .order("created_at", { ascending: false });
         setWorkouts((data ?? []) as any[]);
       } catch {
         setWorkouts([]);
@@ -635,115 +825,140 @@ function SharedSection({ team, userId }: { team: Team; userId: string | null }) 
     load();
   }, [userId]);
 
-  return (
-    <View style={[card, { gap: 16 }]}>
-      <View style={{ gap: 4 }}>
-        <Text style={{ color: "white", fontWeight: "900", fontSize: 15, letterSpacing: -0.2 }}>
-          Mis planillas compartidas
-        </Text>
-        <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 13 }}>
-          Tu entrenador/a puede ver las planillas que compartas acá.
-        </Text>
-      </View>
+  async function share(w: { id: string; title: string; status: string; shot_type: string; sessions_goal: number }) {
+    if (!userId) return;
+    try {
+      setSharing(w.id);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      await supabase.from("team_workouts").upsert({
+        team_id: team.id,
+        workout_id: w.id,
+        user_id: userId,
+        workout_title: w.title,
+        workout_status: w.status,
+        shot_type: w.shot_type,
+        sessions_goal: w.sessions_goal,
+      });
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Compartida ✓", `"${w.title}" ya es visible para tu entrenador/a.`);
+      onShared();
+      onClose();
+    } catch {
+      Alert.alert("Error", "No se pudo compartir. Intentá de nuevo.");
+    } finally {
+      setSharing(null);
+    }
+  }
 
-      {loading ? (
-        <ActivityIndicator color="#F59E0B" style={{ alignSelf: "flex-start" }} />
-      ) : workouts.length === 0 ? (
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.55)" }}>
         <View style={{
-          alignItems: "center", gap: 8, paddingVertical: 18,
-          borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)",
-          borderStyle: "dashed", backgroundColor: "rgba(255,255,255,0.02)",
+          backgroundColor: "#111827",
+          borderTopLeftRadius: 28, borderTopRightRadius: 28,
+          borderWidth: 1, borderColor: "rgba(255,255,255,0.09)",
+          paddingTop: 12, paddingBottom: 40, maxHeight: "80%",
         }}>
-          <Ionicons name="clipboard-outline" size={24} color="rgba(255,255,255,0.18)" />
-          <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
-            No tenés planillas creadas aún.
-          </Text>
-        </View>
-      ) : (
-        <View style={{ gap: 8 }}>
-          {workouts.map((w) => (
-            <WorkoutRow
-              key={w.id}
-              workout={w}
-              teamId={team.id}
-              userId={userId}
-              sharing={sharing === w.id}
-              onShare={async () => {
-                try {
-                  setSharing(w.id);
-                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  await supabase.from("team_workouts").upsert({
-                    team_id: team.id,
-                    workout_id: w.id,
-                    user_id: userId,
-                  });
-                  Alert.alert("Compartida ✓", `"${w.title}" ya es visible para tu entrenador/a.`);
-                } catch {
-                  Alert.alert("Error", "No se pudo compartir. Intentá de nuevo.");
-                } finally {
-                  setSharing(null);
-                }
-              }}
-            />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
+          {/* Handle */}
+          <View style={{
+            width: 40, height: 4, borderRadius: 2,
+            backgroundColor: "rgba(255,255,255,0.18)",
+            alignSelf: "center", marginBottom: 18,
+          }} />
 
-function WorkoutRow({
-  workout, sharing, onShare,
-}: {
-  workout: { id: string; title: string; status: string };
-  teamId: string; userId: string | null;
-  sharing: boolean;
-  onShare: () => void;
-}) {
-  const { scale, onIn, onOut } = usePressScale();
-  return (
-    <View style={{
-      flexDirection: "row", alignItems: "center", gap: 12,
-      padding: 12, borderRadius: 14,
-      backgroundColor: "rgba(255,255,255,0.04)",
-      borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
-    }}>
-      <View style={{
-        width: 38, height: 38, borderRadius: 11,
-        backgroundColor: "rgba(99,179,237,0.10)",
-        borderWidth: 1, borderColor: "rgba(99,179,237,0.22)",
-        alignItems: "center", justifyContent: "center",
-      }}>
-        <Ionicons name="clipboard-outline" size={18} color="rgba(99,179,237,0.70)" />
-      </View>
-      <Text style={{ flex: 1, color: "white", fontWeight: "800", fontSize: 14 }} numberOfLines={1}>
-        {workout.title}
-      </Text>
-      <Animated.View style={{ transform: [{ scale }] }}>
-        <Pressable
-          onPressIn={onIn} onPressOut={onOut}
-          onPress={onShare}
-          disabled={sharing}
-          style={{
-            paddingVertical: 7, paddingHorizontal: 12, borderRadius: 10,
-            backgroundColor: "rgba(99,179,237,0.15)",
-            borderWidth: 1, borderColor: "rgba(99,179,237,0.30)",
-            flexDirection: "row", alignItems: "center", gap: 5,
-          }}
-        >
-          {sharing ? (
-            <ActivityIndicator size="small" color="rgba(99,179,237,1)" />
+          {/* Title row */}
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 22, marginBottom: 18 }}>
+            <Text style={{ flex: 1, color: "white", fontWeight: "900", fontSize: 18, letterSpacing: -0.3 }}>
+              Seleccioná una planilla
+            </Text>
+            <Pressable onPress={onClose} style={{ padding: 6 }}>
+              <Ionicons name="close-outline" size={24} color="rgba(255,255,255,0.50)" />
+            </Pressable>
+          </View>
+
+          {loading ? (
+            <ActivityIndicator color="#F59E0B" style={{ alignSelf: "center", marginTop: 30 }} />
+          ) : workouts.length === 0 ? (
+            <View style={{ alignItems: "center", gap: 8, paddingVertical: 32 }}>
+              <Ionicons name="clipboard-outline" size={32} color="rgba(255,255,255,0.18)" />
+              <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 14 }}>No tenés planillas creadas.</Text>
+            </View>
           ) : (
-            <>
-              <Ionicons name="share-outline" size={14} color="rgba(99,179,237,0.90)" />
-              <Text style={{ color: "rgba(99,179,237,0.90)", fontWeight: "800", fontSize: 12 }}>
-                Compartir
-              </Text>
-            </>
+            <ScrollView
+              contentContainerStyle={{ paddingHorizontal: 18, gap: 8, paddingBottom: 12 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {workouts.map((w) => {
+                const isShared = alreadyShared.includes(w.id);
+                return (
+                  <View
+                    key={w.id}
+                    style={{
+                      flexDirection: "row", alignItems: "center", gap: 12,
+                      padding: 14, borderRadius: 16,
+                      backgroundColor: isShared ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.04)",
+                      borderWidth: 1, borderColor: isShared ? "rgba(34,197,94,0.22)" : "rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <View style={{
+                      width: 40, height: 40, borderRadius: 12,
+                      backgroundColor: isShared ? "rgba(34,197,94,0.12)" : "rgba(99,179,237,0.10)",
+                      borderWidth: 1, borderColor: isShared ? "rgba(34,197,94,0.25)" : "rgba(99,179,237,0.22)",
+                      alignItems: "center", justifyContent: "center",
+                    }}>
+                      <Ionicons
+                        name={isShared ? "checkmark-outline" : "clipboard-outline"}
+                        size={18}
+                        color={isShared ? "rgba(34,197,94,0.80)" : "rgba(99,179,237,0.70)"}
+                      />
+                    </View>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={{ color: "white", fontWeight: "800", fontSize: 14 }} numberOfLines={1}>
+                        {w.title}
+                      </Text>
+                      <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
+                        {isShared ? "Ya compartida con el equipo" : fmtDate(w.created_at)}
+                      </Text>
+                    </View>
+                    {!isShared ? (
+                      <Pressable
+                        onPress={() => share(w)}
+                        disabled={sharing === w.id}
+                        style={{
+                          paddingVertical: 7, paddingHorizontal: 12, borderRadius: 10,
+                          backgroundColor: "rgba(99,179,237,0.15)",
+                          borderWidth: 1, borderColor: "rgba(99,179,237,0.30)",
+                          minWidth: 84, alignItems: "center",
+                        }}
+                      >
+                        {sharing === w.id ? (
+                          <ActivityIndicator size="small" color="rgba(99,179,237,1)" />
+                        ) : (
+                          <Text style={{ color: "rgba(99,179,237,0.90)", fontWeight: "800", fontSize: 12 }}>
+                            Compartir
+                          </Text>
+                        )}
+                      </Pressable>
+                    ) : (
+                      <View style={{
+                        paddingVertical: 7, paddingHorizontal: 12, borderRadius: 10,
+                        backgroundColor: "rgba(34,197,94,0.10)",
+                        borderWidth: 1, borderColor: "rgba(34,197,94,0.22)",
+                        minWidth: 84, alignItems: "center",
+                      }}>
+                        <Text style={{ color: "rgba(34,197,94,0.80)", fontWeight: "800", fontSize: 12 }}>
+                          Enviada ✓
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
           )}
-        </Pressable>
-      </Animated.View>
-    </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
