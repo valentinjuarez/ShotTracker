@@ -10,9 +10,10 @@ import { Animated, Pressable, SafeAreaView, Text, View } from "react-native";
 
 export default function Confirm() {
   const router = useRouter();
-  const { token_hash, type } = useLocalSearchParams<{
+  const { token_hash, type, code } = useLocalSearchParams<{
     token_hash?: string;
     type?: string;
+    code?: string;
   }>();
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
@@ -24,25 +25,38 @@ export default function Confirm() {
   }, []);
 
   useEffect(() => {
-    if (!token_hash) {
-      setErrorMsg("El enlace es inválido o ya fue usado.");
-      setStatus("error");
-      return;
-    }
-
-    const otpType = (type as any) ?? "signup";
-
-    supabase.auth
-      .verifyOtp({ token_hash, type: otpType })
-      .then(({ error }) => {
+    async function verify() {
+      // PKCE flow: code param
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
           setErrorMsg("El enlace expiró o ya fue usado. Creá la cuenta de nuevo.");
           setStatus("error");
         } else {
           setStatus("success");
         }
-      });
-  }, [token_hash, type]);
+        return;
+      }
+
+      // OTP flow: token_hash param
+      if (token_hash) {
+        const otpType = (type as any) ?? "signup";
+        const { error } = await supabase.auth.verifyOtp({ token_hash, type: otpType });
+        if (error) {
+          setErrorMsg("El enlace expiró o ya fue usado. Creá la cuenta de nuevo.");
+          setStatus("error");
+        } else {
+          setStatus("success");
+        }
+        return;
+      }
+
+      setErrorMsg("El enlace es inválido o ya fue usado.");
+      setStatus("error");
+    }
+
+    verify();
+  }, [code, token_hash, type]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>

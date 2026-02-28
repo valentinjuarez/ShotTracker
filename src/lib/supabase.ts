@@ -16,5 +16,6 @@ export const supabase = createClient(url, anonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false, // importante en RN
+    flowType: "pkce",          // código llega como ?code= en vez de #fragment
   },
 });

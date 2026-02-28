@@ -1,17 +1,17 @@
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Animated,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
+    Animated,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 
 type UserRole = "player" | "coach";
@@ -254,6 +254,7 @@ function SubmitButton({ title, loading, disabled, onPress }: {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function Signup() {
+  const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername]       = useState("");
   const [email, setEmail]             = useState("");
@@ -328,6 +329,7 @@ export default function Signup() {
         email, password,
         options: {
           data: { display_name: displayName.trim(), username: u, role },
+          emailRedirectTo: "shottracker://confirm",
         },
       });
 
@@ -338,11 +340,13 @@ export default function Signup() {
         return;
       }
 
-      setSuccessMsg(
-        data.session
-          ? "✅ ¡Cuenta creada! Bienvenido/a."
-          : "📬 Revisá tu email para confirmar la cuenta."
-      );
+      if (data.session) {
+        // Email confirmation is OFF — user is already signed in, navigate immediately
+        router.replace("/(tabs)");
+        return;
+      }
+
+      setSuccessMsg("📬 Revisá tu email para confirmar la cuenta.");
     } finally {
       setLoading(false);
     }

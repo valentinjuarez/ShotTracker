@@ -1,7 +1,9 @@
 // app/reset-password.tsx
-// Landing screen for the "reset password" deep link:
-//   shottracker://reset-password?code=XXXXX
-// Expo Router passes the `code` query param automatically.
+// Landing screen for the "reset password" deep link.
+// Supabase redirects here with tokens in the URL hash fragment:
+//   shottracker://reset-password#access_token=...&refresh_token=...&type=recovery
+// We use Linking.getInitialURL() to read the full URL (Expo Router only
+// exposes query params, not the hash fragment).
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -9,6 +11,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
     Animated,
     KeyboardAvoidingView,
+    Linking,
     Platform,
     Pressable,
     SafeAreaView,
@@ -59,19 +62,56 @@ export default function ResetPassword() {
     Animated.timing(fadeAnim, { toValue: 1, duration: 380, useNativeDriver: true }).start();
   }, []);
 
-  // Step 1: exchange the one-time code for a session
+  // Step 1: exchange the PKCE code for a session.
+  // With flowType:"pkce", Supabase redirects to shottracker://reset-password?code=XXX
+  // Expo Router parses it and gives us `code` via useLocalSearchParams.
+  // Fallback: if the app was in background, read full URL from Linking.
   useEffect(() => {
-    if (!code) {
-      setExchangeError("El enlace es inválido o ya fue usado. Solicitá uno nuevo.");
-      setExchanging(false);
+    let cancelled = false;
+
+    async function tryCode(c: string) {
+      const { error } = await supabase.auth.exchangeCodeForSession(c);
+      if (!cancelled) {
+        if (error) setExchangeError("El enlace expiró o ya fue usado. Solicitá uno nuevo.");
+        setExchanging(false);
+      }
+    }
+
+    // Primary: Expo Router already parsed the ?code= query param
+    if (code) {
+      tryCode(code);
       return;
     }
-    supabase.auth
-      .exchangeCodeForSession(code)
-      .then(({ error }) => {
-        if (error) setExchangeError("El enlace expiró o ya fue usado. Solicitá uno nuevo.");
-      })
-      .finally(() => setExchanging(false));
+
+    // Fallback: app was in background — read full URL from Linking
+    let sub: ReturnType<typeof Linking.addEventListener> | null = null;
+
+    Linking.getInitialURL().then((url) => {
+      if (cancelled) return;
+      const fullUrl = url ?? "";
+      const queryCode = new URLSearchParams(fullUrl.split("?")[1] ?? "").get("code");
+      if (queryCode) { tryCode(queryCode); return; }
+
+      // Still no code — listen for incoming URL (foreground case)
+      sub = Linking.addEventListener("url", ({ url: u }) => {
+        if (cancelled) return;
+        const c2 = new URLSearchParams(u.split("?")[1] ?? "").get("code");
+        if (c2) tryCode(c2);
+      });
+
+      // Give it 10 s then give up
+      setTimeout(() => {
+        if (!cancelled && exchanging) {
+          setExchangeError("El enlace es inválido o ya fue usado. Solicitá uno nuevo.");
+          setExchanging(false);
+        }
+      }, 10000);
+    });
+
+    return () => {
+      cancelled = true;
+      sub?.remove();
+    };
   }, [code]);
 
   const pwError   = password.length > 0 && password.length < 6 ? "Mínimo 6 caracteres" : null;

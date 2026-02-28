@@ -10,6 +10,10 @@
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://zhghgixlwyvsjyjvnshd.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_s726tUtZ_g8jmOT6Bb5yVA_8x9Vl6Ju"
+      },
       "ios": {
         "simulator": false
       }
