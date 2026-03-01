@@ -100,7 +100,14 @@ export default function Home() {
       // Collect ALL session IDs that belong to this user:
       // 1) free sessions created directly with user_id
       // 2) workout sessions (linked via workout_id on the user's workouts)
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      // "Semana actual" = desde el lunes 00:00:00 de esta semana
+      const now = new Date();
+      const dayOfWeek = now.getDay(); // 0=Dom, 1=Lun, ..., 6=Sáb
+      const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() + diffToMonday);
+      weekStart.setHours(0, 0, 0, 0);
+      const since = weekStart.toISOString();
 
       const [{ data: userWorkouts }, { data: freeSessions }] = await Promise.all([
         supabase.from("workouts").select("id").eq("user_id", userId),

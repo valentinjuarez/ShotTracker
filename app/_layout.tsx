@@ -1,10 +1,13 @@
+import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
 import { queryClient } from "@/src/lib/queryClient";
 import { supabase } from "@/src/lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Session } from "@supabase/supabase-js";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Animated, Text, View } from "react-native";
 
 export default function RootLayout() {
   const [session, setSession]     = useState<Session | null>(null);
@@ -12,10 +15,22 @@ export default function RootLayout() {
   const [roleReady, setRoleReady] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session ?? null);
-      setReady(true);
-    });
+    async function init() {
+      // Si el usuario desmarcó "Recordarme", cerrar sesión al abrir la app
+      try {
+        const flag = await AsyncStorage.getItem("@st_remember_me");
+        if (flag === "false") {
+          await AsyncStorage.removeItem("@st_remember_me");
+          await supabase.auth.signOut();
+        }
+      } catch {}
+
+      supabase.auth.getSession().then(({ data }) => {
+        setSession(data.session ?? null);
+        setReady(true);
+      });
+    }
+    init();
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
@@ -45,6 +60,8 @@ export default function RootLayout() {
 
       {ready ? <AuthGate session={session} onRoleReady={() => setRoleReady(true)} /> : null}
 
+      <OfflineBanner />
+
       {/* Opaque shield — blocks any flash of the wrong layout until role is known */}
       {!fullyReady && (
         <View style={{
@@ -56,6 +73,59 @@ export default function RootLayout() {
         </View>
       )}
     </QueryClientProvider>
+  );
+}
+
+function OfflineBanner() {
+  const { isOnline } = useNetworkStatus();
+  const translateY = useRef(new Animated.Value(-60)).current;
+  const prevOnline = useRef<boolean | null>(null);
+  const [visible, setVisible] = useState(false);
+  const [reconnected, setReconnected] = useState(false);
+
+  useEffect(() => {
+    if (isOnline === null) return;
+
+    const wasOnline = prevOnline.current;
+    prevOnline.current = isOnline;
+
+    if (!isOnline) {
+      // Se perdió la conexión → mostrar banner rojo
+      setReconnected(false);
+      setVisible(true);
+      Animated.spring(translateY, { toValue: 0, useNativeDriver: true, damping: 15, stiffness: 120 }).start();
+    } else if (wasOnline === false && isOnline) {
+      // Se recuperó la conexión → mostrar banner verde brevemente
+      setReconnected(true);
+      setVisible(true);
+      Animated.spring(translateY, { toValue: 0, useNativeDriver: true, damping: 15, stiffness: 120 }).start();
+      setTimeout(() => {
+        Animated.timing(translateY, { toValue: -60, duration: 300, useNativeDriver: true }).start(
+          () => setVisible(false),
+        );
+      }, 2200);
+    }
+  }, [isOnline]);
+
+  if (!visible) return null;
+
+  return (
+    <Animated.View style={{
+      position: "absolute", top: 0, left: 0, right: 0, zIndex: 9999,
+      transform: [{ translateY }],
+      backgroundColor: reconnected ? "rgba(34,197,94,0.95)" : "rgba(239,68,68,0.95)",
+      flexDirection: "row", alignItems: "center", gap: 8,
+      paddingTop: 52, paddingBottom: 12, paddingHorizontal: 16,
+    }}>
+      <Ionicons
+        name={reconnected ? "checkmark-circle-outline" : "cloud-offline-outline"}
+        size={16}
+        color="white"
+      />
+      <Text style={{ color: "white", fontWeight: "800", fontSize: 13, flex: 1 }}>
+        {reconnected ? "Conexión restaurada — sincronizando datos…" : "Sin conexión a internet"}
+      </Text>
+    </Animated.View>
   );
 }
 

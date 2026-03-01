@@ -1,10 +1,13 @@
 import { ALL_SPOTS } from "@/src/data/spots";
+import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
 import { supabase } from "@/src/lib/supabase";
 import { Court } from "@/src/ui/Court";
+import { finishLocalSession, loadLocalSession, updateLocalSpotMakes } from "@/src/utils/localStore";
+import { enqueueOp, processQueue } from "@/src/utils/offlineQueue";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -40,6 +43,9 @@ export default function RunSession() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pendingSync, setPendingSync] = useState(0);
+  const { isOnline } = useNetworkStatus();
+  const wasOffline = useRef(false);
 
   const [spotsRows, setSpotsRows] = useState<SessionSpotRow[]>([]);
   const [idx, setIdx] = useState(0);
@@ -59,6 +65,19 @@ export default function RunSession() {
     return new Set(spotsRows.map((r) => r.spot_key));
   }, [spotsRows]);
 
+  // Sincronizar cola cuando se recupera la conexión
+  useEffect(() => {
+    if (isOnline === true && wasOffline.current) {
+      wasOffline.current = false;
+      processQueue().then((n) => {
+        if (n > 0) setPendingSync(0);
+      }).catch(() => {});
+    }
+    if (isOnline === false) {
+      wasOffline.current = true;
+    }
+  }, [isOnline]);
+
   // Cargar datos de la sesión
   useEffect(() => {
     let cancelled = false;
@@ -73,15 +92,24 @@ export default function RunSession() {
       try {
         setLoading(true);
 
+        let rows: SessionSpotRow[] = [];
+
+        // Intentar cargar desde Supabase
         const { data, error } = await supabase
           .from("session_spots")
           .select("id, session_id, spot_key, shot_type, target_attempts, attempts, makes, order_index")
           .eq("session_id", sessionId)
           .order("order_index", { ascending: true });
 
-        if (error) throw error;
-
-        const rows = (data ?? []) as SessionSpotRow[];
+        if (!error && data && data.length > 0) {
+          rows = data as SessionSpotRow[];
+        } else {
+          // Fallback: sesión creada offline
+          const local = await loadLocalSession(sessionId);
+          if (local && local.spots.length > 0) {
+            rows = local.spots as SessionSpotRow[];
+          }
+        }
         if (!rows.length) {
           Alert.alert("Sin spots", "Esta sesión no tiene posiciones cargadas.");
           router.back();
@@ -94,18 +122,19 @@ export default function RunSession() {
           setMakesDraft(rows[0]?.makes ?? 0);
         }
 
-        // Marcar sesión IN_PROGRESS y asegurar que user_id / started_at estén cargados
-        // (las sesiones de planilla pueden no tenerlos si el RPC no los setea)
-        const { data: authSnap } = await supabase.auth.getUser();
-        const runUserId = authSnap.user?.id;
-        await supabase
-          .from("sessions")
-          .update({
-            status: "IN_PROGRESS",
-            started_at: new Date().toISOString(),
-            ...(runUserId ? { user_id: runUserId } : {}),
-          })
-          .eq("id", sessionId);
+        // Marcar sesión IN_PROGRESS (solo si hay conexión)
+        if (isOnline !== false) {
+          const { data: authSnap } = await supabase.auth.getUser();
+          const runUserId = authSnap.user?.id;
+          await supabase
+            .from("sessions")
+            .update({
+              status: "IN_PROGRESS",
+              started_at: new Date().toISOString(),
+              ...(runUserId ? { user_id: runUserId } : {}),
+            })
+            .eq("id", sessionId);
+        }
       } catch (e: any) {
         Alert.alert("Error", e?.message ?? "No se pudo cargar la sesión.");
         router.back();
@@ -144,14 +173,21 @@ export default function RunSession() {
 
       const safeMakes = clampMakes(makesDraft);
 
-      const { error } = await supabase
-        .from("session_spots")
-        .update({ makes: safeMakes })
-        .eq("id", currentRow.id);
+      if (isOnline !== false) {
+        // Online: guardar en Supabase
+        const { error } = await supabase
+          .from("session_spots")
+          .update({ makes: safeMakes })
+          .eq("id", currentRow.id);
+        if (error) throw error;
+      } else {
+        // Offline: encolar para sincronizar después
+        await enqueueOp({ type: "UPDATE_SPOT", spotId: currentRow.id, makes: safeMakes });
+        await updateLocalSpotMakes(sessionId, currentRow.id, safeMakes).catch(() => {});
+        setPendingSync((v) => v + 1);
+      }
 
-      if (error) throw error;
-
-      // actualizar estado local
+      // Actualizar estado local siempre
       setSpotsRows((prev) => {
         const next = [...prev];
         next[idx] = { ...next[idx], makes: safeMakes };
@@ -181,34 +217,44 @@ export default function RunSession() {
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // Mark session as DONE
-      try {
-        await supabase
-          .from("sessions")
-          .update({ status: "DONE", finished_at: new Date().toISOString() })
-          .eq("id", sessionId);
-      } catch {}
+      const finishedAt = new Date().toISOString();
 
-      // If this belongs to a workout, check if all sessions are done and mark workout DONE
-      if (workoutId) {
+      if (isOnline !== false) {
+        // Si hay pendientes offline, sincronizar primero
+        await processQueue().catch(() => {});
+
         try {
-          const { data: wk } = await supabase
-            .from("workouts")
-            .select("sessions_goal")
-            .eq("id", workoutId)
-            .single();
-          const { count: doneCount } = await supabase
+          await supabase
             .from("sessions")
-            .select("id", { count: "exact", head: true })
-            .eq("workout_id", workoutId)
-            .eq("status", "DONE");
-          if (wk && doneCount !== null && doneCount >= wk.sessions_goal) {
-            await supabase
-              .from("workouts")
-              .update({ status: "DONE" })
-              .eq("id", workoutId);
-          }
+            .update({ status: "DONE", finished_at: finishedAt })
+            .eq("id", sessionId);
         } catch {}
+
+        if (workoutId) {
+          try {
+            const { data: wk } = await supabase
+              .from("workouts")
+              .select("sessions_goal")
+              .eq("id", workoutId)
+              .single();
+            const { count: doneCount } = await supabase
+              .from("sessions")
+              .select("id", { count: "exact", head: true })
+              .eq("workout_id", workoutId)
+              .eq("status", "DONE");
+            if (wk && doneCount !== null && doneCount >= wk.sessions_goal) {
+              await supabase.from("workouts").update({ status: "DONE" }).eq("id", workoutId);
+            }
+          } catch {}
+        }
+      } else {
+        // Offline: encolar operaciones de finalización
+        await finishLocalSession(sessionId).catch(() => {});
+        await enqueueOp({ type: "FINISH_SESSION", sessionId, finishedAt });
+        if (workoutId) {
+          await enqueueOp({ type: "FINISH_WORKOUT", workoutId });
+        }
+        setPendingSync((v) => v + 1);
       }
 
       router.replace({
@@ -265,6 +311,30 @@ export default function RunSession() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+      {/* Banner offline / pendiente de sincronizar */}
+      {(isOnline === false || pendingSync > 0) && (
+        <View style={{
+          flexDirection: "row", alignItems: "center", gap: 8,
+          paddingHorizontal: 16, paddingVertical: 9,
+          backgroundColor: isOnline === false ? "rgba(239,68,68,0.12)" : "rgba(245,158,11,0.12)",
+          borderBottomWidth: 1,
+          borderBottomColor: isOnline === false ? "rgba(239,68,68,0.25)" : "rgba(245,158,11,0.25)",
+        }}>
+          <Ionicons
+            name={isOnline === false ? "cloud-offline-outline" : "sync-outline"}
+            size={15}
+            color={isOnline === false ? "rgba(239,68,68,0.90)" : "rgba(245,158,11,0.90)"}
+          />
+          <Text style={{
+            color: isOnline === false ? "rgba(239,68,68,0.90)" : "rgba(245,158,11,0.90)",
+            fontSize: 12, fontWeight: "700", flex: 1,
+          }}>
+            {isOnline === false
+              ? `Sin conexión — guardando localmente (${pendingSync} pendientes)`
+              : `Sincronizando ${pendingSync} tiros al recuperar conexión…`}
+          </Text>
+        </View>
+      )}
       <View style={{ flex: 1, paddingHorizontal: isSmall ? 16 : 20, paddingTop: 10, gap: 14 }}>
         {/* Header */}
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>

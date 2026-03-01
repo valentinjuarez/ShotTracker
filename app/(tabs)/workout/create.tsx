@@ -1,5 +1,6 @@
 // app/workout/create.tsx
 import { DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
+import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
 import { supabase } from "@/src/lib/supabase";
 import { Court } from "@/src/ui/Court";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,17 +9,17 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
+    useWindowDimensions,
 } from "react-native";
 
 type PlanTipo = "3PT" | "2PT";
@@ -65,6 +66,7 @@ export default function CreateWorkout() {
   const [defaultTarget, setDefaultTarget] = useState(10);
   const [nameFocused, setNameFocused] = useState(false);
   const [saving, setSaving]           = useState(false);
+  const { isOnline } = useNetworkStatus();
 
   const router    = useRouter();
   const btnScale   = useRef(new Animated.Value(1)).current;
@@ -116,6 +118,13 @@ export default function CreateWorkout() {
 
   async function onCreateWorkout() {
     if (!canCreate) return;
+    if (isOnline === false) {
+      Alert.alert(
+        "Sin conexión",
+        "Las planillas se sincronizan con el servidor al crearlas. Conectá internet e intentá de nuevo.",
+      );
+      return;
+    }
     try {
       setSaving(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

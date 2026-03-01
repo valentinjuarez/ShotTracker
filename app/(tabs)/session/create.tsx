@@ -1,23 +1,26 @@
 ﻿// app/session/create.tsx
 import { ALL_SPOTS, DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
+import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
 import { supabase } from "@/src/lib/supabase";
 import { Court } from "@/src/ui/Court";
+import { generateUUID, saveLocalSession } from "@/src/utils/localStore";
+import { enqueueOp } from "@/src/utils/offlineQueue";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Modal,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Modal,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    View,
+    useWindowDimensions,
 } from "react-native";
 
 //  Animation hooks 
@@ -60,6 +63,7 @@ export default function CreateSession() {
   const [showCourtModal, setShowCourtModal] = useState(false);
   const [currentSpotIndex, setCurrentSpotIndex] = useState(0);
   const [saving, setSaving]                 = useState(false);
+  const { isOnline } = useNetworkStatus();
 
   const selectedCount = selected.size;
   const currentSpot   = ALL_SPOTS[currentSpotIndex];
@@ -129,6 +133,39 @@ export default function CreateSession() {
 
       const modeLabel = mode === "3PT" ? "Triples" : mode === "2PT" ? "Dobles" : mode === "ALL" ? "Completo" : "Libre";
       const title = `Sesión ${modeLabel}  ${new Date().toLocaleDateString()}`;
+
+      if (isOnline === false) {
+        // ─ Modo offline: generar UUID local y guardar en AsyncStorage ─
+        const sessionId = generateUUID();
+        const now = new Date().toISOString();
+        const sessionRow = {
+          id: sessionId,
+          user_id: userId,
+          kind: "FREE",
+          title,
+          default_target_attempts: defaultTarget,
+          status: "IN_PROGRESS",
+          started_at: now,
+          workout_id: null,
+        };
+        const spotRows = selectedSpots.map((spot, i) => ({
+          id: generateUUID(),
+          session_id: sessionId,
+          user_id: userId,
+          spot_key: spot.id,
+          shot_type: spot.shotType as "2PT" | "3PT",
+          target_attempts: defaultTarget,
+          attempts: defaultTarget,
+          makes: 0,
+          order_index: i,
+        }));
+        await saveLocalSession(sessionRow, spotRows);
+        await enqueueOp({ type: "CREATE_SESSION", session: sessionRow, spots: spotRows });
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setShowCourtModal(false);
+        router.push({ pathname: "/session/run", params: { sessionId } });
+        return;
+      }
 
       const { data: sessionRow, error: sErr } = await supabase
         .from("sessions")

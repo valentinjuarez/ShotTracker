@@ -1,17 +1,18 @@
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Animated,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
+    Animated,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 
 // ─── Animated input field ─────────────────────────────────────────────────────
@@ -139,6 +140,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading]   = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(true);
   const router = useRouter();
 
   const anims = {
@@ -187,6 +189,11 @@ export default function Login() {
     try {
       setLoading(true);
       setAuthError(null);
+      if (!rememberMe) {
+        await AsyncStorage.setItem("@st_remember_me", "false");
+      } else {
+        await AsyncStorage.removeItem("@st_remember_me");
+      }
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setAuthError(error.message);
     } finally {
@@ -252,8 +259,29 @@ export default function Login() {
               textContentType="password" enterAnim={anims.f2} />
           </View>
 
-          {/* Forgot password */}
-          <Animated.View style={{ alignItems: "flex-end", marginTop: 6, marginBottom: 4, opacity: anims.f2 }}>
+          {/* Recordarme + Forgot password */}
+          <Animated.View style={{
+            flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+            marginTop: 6, marginBottom: 4, opacity: anims.f2,
+          }}>
+            <Pressable
+              onPress={() => setRememberMe((v) => !v)}
+              hitSlop={8}
+              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+            >
+              <View style={{
+                width: 22, height: 22, borderRadius: 7,
+                borderWidth: 1.5,
+                borderColor: rememberMe ? "#F59E0B" : "rgba(255,255,255,0.25)",
+                backgroundColor: rememberMe ? "rgba(245,158,11,0.18)" : "transparent",
+                alignItems: "center", justifyContent: "center",
+              }}>
+                {rememberMe && <Ionicons name="checkmark" size={13} color="#F59E0B" />}
+              </View>
+              <Text style={{ color: "rgba(255,255,255,0.55)", fontSize: 13, fontWeight: "600" }}>
+                Recordarme
+              </Text>
+            </Pressable>
             <Pressable onPress={() => router.push("/(auth)/forgot-password")} hitSlop={8}>
               <Text style={{ color: "rgba(245,158,11,0.70)", fontSize: 13, fontWeight: "700" }}>
                 ¿Olvidaste tu contraseña?

@@ -500,14 +500,16 @@ export default function SessionSummary() {
                   </View>
                 </View>
 
-                <HeatCourt
-                  width={courtW}
-                  height={courtH}
-                  spots={ALL_SPOTS}
-                  spotDataMap={new Map(stats.perSpot.map((r) => [r.spot_key, r]))}
-                  selectedSpotKey={selectedSpotKey}
-                  onSelectSpot={async (key) => { await onHaptic(); setSelectedSpotKey(key); }}
-                />
+                <View style={{ alignItems: "center" }}>
+                  <HeatCourt
+                    width={courtW}
+                    height={courtH}
+                    spots={ALL_SPOTS}
+                    spotDataMap={new Map(stats.perSpot.map((r) => [r.spot_key, r]))}
+                    selectedSpotKey={selectedSpotKey}
+                    onSelectSpot={async (key) => { await onHaptic(); setSelectedSpotKey(key); }}
+                  />
+                </View>
               </View>
 
               <View style={[card, { marginTop: 14 }]}>
@@ -641,15 +643,26 @@ export default function SessionSummary() {
           ) : null}
 
           {/* ── Secondary row: Home · PDF (condicional) · Mi equipo (solo planillas) ── */}
+          {(() => {
+            const showExtras = !workout || completedSessions >= workout.sessions_goal;
+            return (
           <View style={{ flexDirection: "row", gap: 10 }}>
             {/* Home */}
             <SpringBtn
               onPress={async () => { await onHaptic(); router.replace("/"); }}
               onHaptic={() => onHaptic()}
-              style={{ width: 54, height: 54, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.06)",
-                borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
-                alignItems: "center" as const, justifyContent: "center" as const }}>
+              style={showExtras
+                ? { width: 54, height: 54, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.06)",
+                    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+                    alignItems: "center" as const, justifyContent: "center" as const }
+                : { flex: 1, height: 54, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.06)",
+                    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+                    alignItems: "center" as const, justifyContent: "center" as const,
+                    flexDirection: "row" as const, gap: 8 }}>
               <Ionicons name="home" size={20} color="rgba(255,255,255,0.9)" />
+              {!showExtras && (
+                <Text style={{ color: "rgba(255,255,255,0.9)", fontWeight: "800", fontSize: 14 }}>Inicio</Text>
+              )}
             </SpringBtn>
 
             {/* PDF — sesión libre: siempre. Planilla: solo al completar */}
@@ -692,6 +705,8 @@ export default function SessionSummary() {
               </SpringBtn>
             )}
           </View>
+            );
+          })()}
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
