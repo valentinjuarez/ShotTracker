@@ -1,50 +1,63 @@
-# Welcome to your Expo app 👋
+# 🏀 Shot Tracker
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Shot Tracker is a mobile application designed to help basketball players and coaches track shooting performance in a simple, visual, and structured way.
 
-## Get started
+Born from real training sessions, the app aims to make effort visible — especially in environments where data is often underutilized, like amateur and women’s basketball.
 
-1. Install dependencies
+---
 
-   ```bash
-   npm install
-   ```
+## ✨ Features
 
-2. Start the app
+- 📍 Shot tracking by court position (2PT & 3PT)
+- 🎯 Session-based training flow
+- 📊 Automatic statistics calculation (makes, attempts, percentages)
+- 🔥 Heatmap visualization of performance
+- 🧠 Smart training insights per session
+- 📋 Workout plans (training templates)
+- 👥 Designed for both players and coaches
 
-   ```bash
-   npx expo start
-   ```
+---
 
-In the output, you'll find options to open the app in a
+## 📱 Tech Stack
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+### Frontend
+- React Native
+- Expo
+- TypeScript
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+### UI & Visualization
+- React Native SVG (custom basketball court & heatmaps)
+- Custom component system
 
-## Get a fresh project
+### Backend (Cloud)
+- Supabase
+  - PostgreSQL database
+  - Authentication (email/password)
+  - Auto-generated APIs
 
-When you're ready, run:
+### Tools
+- Git & GitHub
+- Expo CLI
+- Node.js
+
+---
+
+## 🧩 Architecture
+
+The app follows a simple and scalable structure:
+
+- **Client (React Native)** handles UI, interaction, and lightweight calculations
+- **Supabase (Backend)** handles:
+  - Data persistence (sessions, spots, results)
+  - Authentication
+  - Secure access via Row Level Security (RLS)
+
+---
+
+## 🚀 Getting Started
+
+### 1. Clone the repository
 
 ```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+git clone https://github.com/your-username/shot-tracker.git
+cd shot-tracker
