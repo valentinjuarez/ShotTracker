@@ -3,6 +3,7 @@
  * Permite crear y completar sesiones sin conexión a internet.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getSecureJson, removeSecureJson, setSecureJson } from "./secureStore";
 
 const PREFIX = "@st_local_session_";
 
@@ -32,15 +33,24 @@ export async function saveLocalSession(
   session: LocalSession,
   spots: LocalSessionSpot[],
 ): Promise<void> {
-  await AsyncStorage.setItem(PREFIX + session.id, JSON.stringify({ session, spots }));
+  await setSecureJson(PREFIX + session.id, { session, spots });
 }
 
 export async function loadLocalSession(
   sessionId: string,
 ): Promise<{ session: LocalSession; spots: LocalSessionSpot[] } | null> {
-  const raw = await AsyncStorage.getItem(PREFIX + sessionId);
-  if (!raw) return null;
-  return JSON.parse(raw);
+  const key = PREFIX + sessionId;
+
+  const secure = await getSecureJson<{ session: LocalSession; spots: LocalSessionSpot[] }>(key);
+  if (secure) return secure;
+
+  const legacyRaw = await AsyncStorage.getItem(key);
+  if (!legacyRaw) return null;
+
+  const parsed = JSON.parse(legacyRaw) as { session: LocalSession; spots: LocalSessionSpot[] };
+  await setSecureJson(key, parsed);
+  await AsyncStorage.removeItem(key);
+  return parsed;
 }
 
 export async function updateLocalSpotMakes(
@@ -51,18 +61,20 @@ export async function updateLocalSpotMakes(
   const data = await loadLocalSession(sessionId);
   if (!data) return;
   data.spots = data.spots.map((s) => (s.id === spotId ? { ...s, makes } : s));
-  await AsyncStorage.setItem(PREFIX + sessionId, JSON.stringify(data));
+  await setSecureJson(PREFIX + sessionId, data);
 }
 
 export async function finishLocalSession(sessionId: string): Promise<void> {
   const data = await loadLocalSession(sessionId);
   if (!data) return;
   data.session.status = "DONE";
-  await AsyncStorage.setItem(PREFIX + sessionId, JSON.stringify(data));
+  await setSecureJson(PREFIX + sessionId, data);
 }
 
 export async function deleteLocalSession(sessionId: string): Promise<void> {
-  await AsyncStorage.removeItem(PREFIX + sessionId);
+  const key = PREFIX + sessionId;
+  await removeSecureJson(key);
+  await AsyncStorage.removeItem(key);
 }
 
 /** Genera un UUID v4 simple sin dependencias externas */

@@ -4,14 +4,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React from "react";
 import {
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    View,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  View,
 } from "react-native";
 
-const CONTACT_EMAIL = "shottracker.app@gmail.com"; // ← cambiá por tu e-mail real
+const CONTACT_EMAIL = "shottracker.app@gmail.com"; 
 const APP_NAME      = "Shot Tracker";
 const LAST_UPDATED  = "Febrero 2026";
 
@@ -127,11 +127,10 @@ export default function PrivacyPolicy() {
             <Para>
               Podés eliminar tu cuenta en cualquier momento desde{" "}
               <Text style={{ color: "#F59E0B", fontWeight: "700" }}>Perfil → Eliminar cuenta</Text>.
-              Al hacerlo se borran permanentemente:
+              Al hacerlo se borran permanentemente los datos asociados a tu rol:
             </Para>
-            <Bullet text="Todas tus sesiones y estadísticas de tiro" />
-            <Bullet text="Todas tus planillas de entrenamiento" />
-            <Bullet text="Tu perfil y membresías de equipo" />
+            <Bullet text="Jugador/a: sesiones, estadísticas, planillas y membresías de equipo" />
+            <Bullet text="Entrenador/a: perfil, equipo creado (si existe) y membresías" />
             <Bullet text="Tu cuenta de autenticación" />
             <Para>Este proceso es irreversible. No guardamos copias de seguridad de datos eliminados.</Para>
           </Section>

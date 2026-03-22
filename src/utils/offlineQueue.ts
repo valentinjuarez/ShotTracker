@@ -6,6 +6,7 @@
 import { supabase } from "@/src/lib/supabase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { deleteLocalSession } from "./localStore";
+import { getSecureJson, setSecureJson } from "./secureStore";
 
 const QUEUE_KEY = "@st_sync_queue";
 
@@ -39,12 +40,20 @@ export type QueuedOp =
   | { type: "FINISH_WORKOUT"; workoutId: string };
 
 async function readQueue(): Promise<QueuedOp[]> {
-  const raw = await AsyncStorage.getItem(QUEUE_KEY);
-  return raw ? JSON.parse(raw) : [];
+  const secure = await getSecureJson<QueuedOp[]>(QUEUE_KEY);
+  if (secure) return secure;
+
+  const legacyRaw = await AsyncStorage.getItem(QUEUE_KEY);
+  if (!legacyRaw) return [];
+
+  const parsed = JSON.parse(legacyRaw) as QueuedOp[];
+  await setSecureJson(QUEUE_KEY, parsed);
+  await AsyncStorage.removeItem(QUEUE_KEY);
+  return parsed;
 }
 
 async function writeQueue(queue: QueuedOp[]): Promise<void> {
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+  await setSecureJson(QUEUE_KEY, queue);
 }
 
 /** Encola una operación. UPDATE_SPOT se deduplica por spotId (último gana). */
