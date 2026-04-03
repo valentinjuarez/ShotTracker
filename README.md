@@ -59,5 +59,5 @@ The app follows a simple and scalable structure:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/shot-tracker.git
+git clone https://github.com/valentinjuarez/ShotTracker.git
 cd shot-tracker
