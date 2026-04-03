@@ -1,13 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import {
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    useWindowDimensions,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
 } from "react-native";
 
 export function AuthShell({
@@ -38,7 +38,6 @@ export function AuthShell({
           }}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Header */}
           <View style={{ gap: 10 }}>
             <View
               style={{
@@ -84,7 +83,6 @@ export function AuthShell({
               </View>
             </View>
 
-            {/* “Court line” */}
             <View
               style={{
                 height: 1,
@@ -94,7 +92,6 @@ export function AuthShell({
             />
           </View>
 
-          {/* Card */}
           <View
             style={{
               flex: 1,
@@ -109,7 +106,6 @@ export function AuthShell({
             {children}
           </View>
 
-          {/* Footer */}
           <Text
             style={{
               textAlign: "center",

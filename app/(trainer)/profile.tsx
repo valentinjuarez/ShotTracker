@@ -1,6 +1,7 @@
 // app/(trainer)/profile.tsx  — Coach profile
+import { deleteOwnAuthUser, getCurrentUserId, signOut } from "@/src/features/auth/services/auth.service";
+import { deleteCoachAccount, deleteTeam, getCoachTeamId, getTeamStats } from "@/src/features/team/services/team.service";
 import { useProfile } from "@/src/hooks/useProfile";
-import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -34,59 +35,17 @@ export default function CoachProfile() {
 
   const loadStats = useCallback(async () => {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const userId = await getCurrentUserId();
       if (!userId) return;
 
-      const { data: membership } = await supabase
-        .from("team_members")
-        .select("team_id, teams(id, name)")
-        .eq("user_id", userId)
-        .eq("role", "coach")
-        .maybeSingle();
-
-      if (!membership) { setTeamStats(null); setTeamId(null); return; }
-      const tId = (membership as any).team_id as string;
-      setTeamId(tId);
-
-      const { data: members } = await supabase
-        .from("team_members")
-        .select("user_id")
-        .eq("team_id", tId)
-        .eq("role", "player");
-
-      const playerIds: string[] = (members ?? []).map((m: any) => m.user_id);
-
-      let totalSessions = 0;
-      let totalAttempts = 0;
-      let totalMakes    = 0;
-
-      if (playerIds.length > 0) {
-        const { data: sessions } = await supabase
-          .from("sessions")
-          .select("id")
-          .in("user_id", playerIds);
-
-        const sessionIds = (sessions ?? []).map((s: any) => s.id);
-        totalSessions = sessionIds.length;
-
-        if (sessionIds.length > 0) {
-          const { data: spots } = await supabase
-            .from("session_spots")
-            .select("attempts, makes")
-            .in("session_id", sessionIds);
-
-          totalAttempts = (spots ?? []).reduce((a: number, s: any) => a + (s.attempts ?? 0), 0);
-          totalMakes    = (spots ?? []).reduce((a: number, s: any) => a + (s.makes    ?? 0), 0);
-        }
+      const stats = await getTeamStats(userId);
+      const coachTeamId = await getCoachTeamId(userId);
+      setTeamId(coachTeamId);
+      if (stats) {
+        setTeamStats(stats);
+      } else {
+        setTeamStats(null);
       }
-
-      setTeamStats({
-        players:       playerIds.length,
-        totalSessions,
-        totalAttempts,
-        teamPct: totalAttempts > 0 ? totalMakes / totalAttempts : null,
-      });
     } catch {
       setTeamStats(null);
     } finally {
@@ -105,7 +64,7 @@ export default function CoachProfile() {
 
   async function onLogout() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await supabase.auth.signOut();
+    await signOut();
   }
 
   function onDeleteTeam() {
@@ -121,8 +80,7 @@ export default function CoachProfile() {
           style: "destructive",
           onPress: async () => {
             try {
-              await supabase.from("team_members").delete().eq("team_id", teamId);
-              await supabase.from("teams").delete().eq("id", teamId);
+              await deleteTeam(teamId);
               setTeamStats(null);
               setTeamId(null);
             } catch {
@@ -146,18 +104,11 @@ export default function CoachProfile() {
           style: "destructive",
           onPress: async () => {
             try {
-              const { data: auth } = await supabase.auth.getUser();
-              const userId = auth.user?.id;
+              const userId = await getCurrentUserId();
               if (!userId) return;
-              if (teamId) {
-                await supabase.from("team_members").delete().eq("team_id", teamId);
-                await supabase.from("teams").delete().eq("id", teamId);
-              }
-              await supabase.from("team_members").delete().eq("user_id", userId);
-              await supabase.from("profiles").delete().eq("id", userId);
-              // Eliminar el registro de autenticación (requerido por Apple)
-              await supabase.rpc("delete_own_auth_user");
-              await supabase.auth.signOut();
+              await deleteCoachAccount(userId, teamId);
+              await deleteOwnAuthUser();
+              await signOut();
             } catch {
               Alert.alert("Error", "No se pudo eliminar la cuenta.");
             }

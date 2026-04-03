@@ -1,8 +1,9 @@
 // app/workout/create.tsx
 import { DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
+import { Court } from "@/src/features/session/components/Court";
+import { getCurrentUserId } from "@/src/features/session/services/session.service";
+import { createWorkoutSession } from "@/src/features/workout/services/workout.service";
 import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
-import { supabase } from "@/src/lib/supabase";
-import { Court } from "@/src/ui/Court";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
@@ -129,27 +130,22 @@ export default function CreateWorkout() {
       setSaving(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const userId = await getCurrentUserId();
       if (!userId) throw new Error("No autenticado");
 
-      // Create workout + first session + spots in one security-definer RPC
       const orderedSpotKeys = spots
         .filter((s) => selected.has(s.id))
         .map((s) => s.id);
 
-      const { data: rpcData, error: rpcErr } = await supabase
-        .rpc("create_workout_session", {
-          p_title:           name.trim(),
-          p_shot_type:       tipo,
-          p_sessions_goal:   sessionsGoal,
-          p_target_per_spot: defaultTarget,
-          p_spot_keys:       orderedSpotKeys,
-        });
-      if (rpcErr) throw rpcErr;
+      const { workoutId, sessionId } = await createWorkoutSession({
+        title: name.trim(),
+        shotType: tipo,
+        sessionsGoal,
+        targetPerSpot: defaultTarget,
+        spotKeys: orderedSpotKeys,
+      });
 
-      const workoutId = (rpcData as any).workout_id as string;
-      const sessionId = (rpcData as any).session_id as string;
+      if (!workoutId || !sessionId) throw new Error("No se pudo crear la planilla.");
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 

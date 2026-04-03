@@ -1,21 +1,23 @@
 // app/(trainer)/workouts.tsx — Shared workouts: full detail for coach
 import { ALL_SPOTS } from "@/src/data/spots";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
+import { getCoachSharedWorkouts } from "@/src/features/team/services/team.service";
+import { getWorkoutSessionsDetailed, WorkoutSessionDetail } from "@/src/features/workout/services/workout.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Modal,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Animated,
+    Modal,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    TextInput,
+    useWindowDimensions,
+    View,
 } from "react-native";
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 
@@ -96,51 +98,10 @@ export default function WorkoutsScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const userId = await getCurrentUserId();
       if (!userId) return;
-
-      const { data: membership } = await supabase
-        .from("team_members")
-        .select("team_id")
-        .eq("user_id", userId)
-        .eq("role", "coach")
-        .maybeSingle();
-
-      if (!membership) { setEntries([]); return; }
-      const teamId = (membership as any).team_id as string;
-
-      const { data: shared } = await supabase
-        .from("team_workouts")
-        .select("id, workout_id, user_id, shared_at, workout_title, workout_status, shot_type, sessions_goal")
-        .eq("team_id", teamId)
-        .order("shared_at", { ascending: false });
-
-      const sharedRows = shared ?? [];
-
-      const playerIds: string[] = [...new Set(sharedRows.map((s: any) => s.user_id as string))];
-      const nameMap: Record<string, string> = {};
-      if (playerIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, display_name")
-          .in("id", playerIds);
-        (profiles ?? []).forEach((p: any) => { nameMap[p.id] = p.display_name ?? `#${p.id.slice(0, 6)}`; });
-      }
-
-      const result: WorkoutEntry[] = sharedRows.map((s: any) => ({
-        shareId:      s.id,
-        workoutId:    s.workout_id,
-        title:        s.workout_title    ?? "Sin título",
-        status:       s.workout_status   ?? "",
-        shotType:     s.shot_type        ?? "",
-        sessionsGoal: s.sessions_goal    ?? 0,
-        sharedAt:     s.shared_at,
-        playerId:     s.user_id,
-        playerName:   nameMap[s.user_id] ?? `#${s.user_id.slice(0, 6)}`,
-      }));
-
-      setEntries(result);
+      const result = await getCoachSharedWorkouts(userId);
+      setEntries(result as WorkoutEntry[]);
     } catch {
       // silent
     } finally {
@@ -235,7 +196,7 @@ export default function WorkoutsScreen() {
           <EmptyState />
         ) : filteredByPlayer.size === 0 ? (
           <View style={[card, { alignItems: "center", paddingVertical: 36 }]}>
-            <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 14 }}>Sin resultados para "{search}"</Text>
+            <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 14 }}>{`Sin resultados para "${search}"`}</Text>
           </View>
         ) : (
           Array.from(filteredByPlayer.entries()).map(([playerId, { name, items }]) => (
@@ -403,65 +364,22 @@ function WorkoutDetailCard({ entry }: { entry: WorkoutEntry }) {
     if (sessions.length > 0) return;
     try {
       setLoadingSess(true);
-      const { data: sessList } = await supabase
-        .from("sessions")
-        .select("id, session_number, status, finished_at")
-        .eq("workout_id", entry.workoutId)
-        .order("session_number", { ascending: true });
-
-      const rows = (sessList ?? []) as any[];
-      const sessionIds = rows.map((r) => r.id);
-      let spotsRaw: any[] = [];
-      if (sessionIds.length > 0) {
-        const { data: sp } = await supabase
-          .from("session_spots")
-          .select("session_id, spot_key, attempts, makes")
-          .in("session_id", sessionIds);
-        spotsRaw = sp ?? [];
-      }
-
-      const sessAgg: Record<string, { att: number; mk: number }> = {};
-      spotsRaw.forEach((s) => {
-        if (!sessAgg[s.session_id]) sessAgg[s.session_id] = { att: 0, mk: 0 };
-        sessAgg[s.session_id].att += s.attempts ?? 0;
-        sessAgg[s.session_id].mk  += s.makes    ?? 0;
-      });
-
-      // Per-session spot aggregates
-      const spotsBySession: Record<string, Record<string, { att: number; mk: number }>> = {};
-      spotsRaw.forEach((s) => {
-        if (!spotsBySession[s.session_id]) spotsBySession[s.session_id] = {};
-        if (!spotsBySession[s.session_id][s.spot_key]) spotsBySession[s.session_id][s.spot_key] = { att: 0, mk: 0 };
-        spotsBySession[s.session_id][s.spot_key].att += s.attempts ?? 0;
-        spotsBySession[s.session_id][s.spot_key].mk  += s.makes    ?? 0;
-      });
-
-      const builtRows: SessionRow[] = rows.map((r) => {
-        const a = sessAgg[r.id] ?? { att: 0, mk: 0 };
-        const sessSpots = Object.entries(spotsBySession[r.id] ?? {}).map(([key, v]) => ({
-          spotKey: key, attempts: v.att, makes: v.mk, pct: v.att > 0 ? v.mk / v.att : 0,
-        }));
-        return {
-          id:            r.id,
-          sessionNumber: r.session_number,
-          status:        r.status,
-          finishedAt:    r.finished_at ?? null,
-          attempts:      a.att,
-          makes:         a.mk,
-          pct:           a.att > 0 ? a.mk / a.att : null,
-          spots:         sessSpots,
-        };
-      });
-      setSessions(builtRows);
+      const builtRows = await getWorkoutSessionsDetailed(entry.workoutId);
+      setSessions(builtRows as SessionRow[]);
 
       const spotMap: Record<string, { att: number; mk: number }> = {};
-      spotsRaw.forEach((s) => {
-        if (!spotMap[s.spot_key]) spotMap[s.spot_key] = { att: 0, mk: 0 };
-        spotMap[s.spot_key].att += s.attempts ?? 0;
-        spotMap[s.spot_key].mk  += s.makes    ?? 0;
+      (builtRows as WorkoutSessionDetail[]).forEach((s) => {
+        s.spots.forEach((sp) => {
+          if (!spotMap[sp.spotKey]) spotMap[sp.spotKey] = { att: 0, mk: 0 };
+          spotMap[sp.spotKey].att += sp.attempts;
+          spotMap[sp.spotKey].mk += sp.makes;
+        });
       });
       setSpotAgg(Object.entries(spotMap).map(([key, v]) => ({
-        spotKey: key, attempts: v.att, makes: v.mk, pct: v.att > 0 ? v.mk / v.att : 0,
+        spotKey: key,
+        attempts: v.att,
+        makes: v.mk,
+        pct: v.att > 0 ? v.mk / v.att : 0,
       })));
     } finally {
       setLoadingSess(false);

@@ -1,20 +1,23 @@
 ﻿// app/(tabs)/index.tsx
-import { supabase } from "@/src/lib/supabase";
+import { usePlayerHomeController } from "@/src/features/home/hooks/usePlayerHomeController";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Link, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Pressable,
-    RefreshControl,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    View,
-    useWindowDimensions,
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  View,
+  useWindowDimensions,
 } from "react-native";
+
+//  Shared styles 
+
 
 //  Animation hooks 
 
@@ -22,7 +25,7 @@ function useFadeSlide(delay = 0) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: 1, duration: 420, delay, useNativeDriver: true }).start();
-  }, []);
+  }, [anim, delay]);
   return {
     opacity: anim,
     transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] }) }],
@@ -36,18 +39,6 @@ function usePressScale() {
   return { scale, onIn, onOut };
 }
 
-//  Types 
-
-type SessionRow = {
-  id: string;
-  title: string | null;
-  status: string;
-  started_at: string | null;
-  finished_at: string | null;
-};
-
-type SpotAgg = { attempts: number; makes: number };
-
 //  Main screen 
 
 export default function Home() {
@@ -55,237 +46,31 @@ export default function Home() {
   const { width } = useWindowDimensions();
   const isSmall = width < 360;
 
-  const [name, setName]               = useState<string>("");
-  const [loadingStats, setLoadingStats] = useState(true);
-  const [weeklyAttempts, setWeeklyAttempts] = useState<number | null>(null);
-  const [weeklyPct, setWeeklyPct]     = useState<number | null>(null);
-  const [lastSession, setLastSession] = useState<SessionRow | null>(null);
-  const [lastSpots, setLastSpots]     = useState<SpotAgg>({ attempts: 0, makes: 0 });
-  const [inProgressWorkout, setInProgressWorkout] = useState<{
-    id: string;
-    title: string;
-    status: string;
-    sessionsGoal: number;
-    completedSessions: number;
-    currentSessionId: string | null;
-  } | null>(null);
-  const [refreshing, setRefreshing]       = useState(false);
-  const [startingSession, setStartingSession] = useState(false);
-
-  const initials = useMemo(() => {
-    const n = (name || "").trim();
-    if (!n) return "";
-    const parts = n.split(" ").filter(Boolean);
-    const a = parts[0]?.[0]?.toUpperCase() ?? "";
-    const b = parts[1]?.[0]?.toUpperCase() ?? "";
-    return (a + b) || a || "";
-  }, [name]);
+  const {
+    initials,
+    inProgressWorkout,
+    lastDate,
+    lastLabel,
+    lastPct,
+    lastPctStr,
+    lastSession,
+    lastSpots,
+    loadingStats,
+    name,
+    onContinueWorkout,
+    onLogout,
+    onRefresh,
+    refreshing,
+    startingSession,
+    weeklyAttempts,
+    weeklyPct,
+  } = usePlayerHomeController();
 
   const headerAnim  = useFadeSlide(0);
   const heroAnim    = useFadeSlide(80);
   const statsAnim   = useFadeSlide(160);
   const lastAnim    = useFadeSlide(240);
   const workoutAnim = useFadeSlide(320);
-
-  const loadData = useCallback(async () => {
-    const { data: auth } = await supabase.auth.getUser();
-    const userId = auth.user?.id;
-    const meta: any = auth.user?.user_metadata ?? {};
-    setName(meta.display_name ?? meta.username ?? "");
-    if (!userId) { setLoadingStats(false); return; }
-
-    try {
-      setLoadingStats(true);
-
-      // Collect ALL session IDs that belong to this user:
-      // 1) free sessions created directly with user_id
-      // 2) workout sessions (linked via workout_id on the user's workouts)
-      // "Semana actual" = desde el lunes 00:00:00 de esta semana
-      const now = new Date();
-      const dayOfWeek = now.getDay(); // 0=Dom, 1=Lun, ..., 6=Sáb
-      const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() + diffToMonday);
-      weekStart.setHours(0, 0, 0, 0);
-      const since = weekStart.toISOString();
-
-      const [{ data: userWorkouts }, { data: freeSessions }] = await Promise.all([
-        supabase.from("workouts").select("id").eq("user_id", userId),
-        supabase.from("sessions").select("id, started_at").eq("user_id", userId),
-      ]);
-      const workoutIds = (userWorkouts ?? []).map((w: any) => w.id as string);
-      let workoutSessionIds: string[] = [];
-      if (workoutIds.length > 0) {
-        const { data: wSess } = await supabase
-          .from("sessions").select("id, started_at").in("workout_id", workoutIds);
-        workoutSessionIds = (wSess ?? []).map((s: any) => s.id as string);
-      }
-      // Merge & deduplicate all session ids
-      const allSessionIds = [
-        ...new Set([
-          ...(freeSessions ?? []).map((s: any) => s.id as string),
-          ...workoutSessionIds,
-        ]),
-      ];
-
-      // Weekly sessions (last 7 days)
-      const { data: weekSessions } = allSessionIds.length > 0
-        ? await supabase
-            .from("sessions")
-            .select("id")
-            .in("id", allSessionIds)
-            .gte("started_at", since)
-        : { data: [] };
-
-      const weekSessionIds = (weekSessions ?? []).map((s: any) => s.id as string);
-      if (weekSessionIds.length > 0) {
-        const { data: weekSpots } = await supabase
-          .from("session_spots")
-          .select("attempts, makes")
-          .in("session_id", weekSessionIds);
-        const spots = (weekSpots ?? []) as SpotAgg[];
-        const totalAt = spots.reduce((a, s) => a + (s.attempts ?? 0), 0);
-        const totalMk = spots.reduce((a, s) => a + (s.makes    ?? 0), 0);
-        setWeeklyAttempts(totalAt);
-        setWeeklyPct(totalAt > 0 ? totalMk / totalAt : null);
-      } else {
-        setWeeklyAttempts(0);
-        setWeeklyPct(null);
-      }
-
-      // Last session (any status, most recent first) — across free + workout sessions
-      // Use NULLS LAST so sessions without started_at (old workout sessions) don't float to top
-      const { data: sessions } = allSessionIds.length > 0
-        ? await supabase
-            .from("sessions")
-            .select("id, title, status, started_at, finished_at")
-            .in("id", allSessionIds)
-            .not("started_at", "is", null)
-            .order("started_at", { ascending: false })
-            .limit(1)
-        : { data: [] };
-      const last = (sessions ?? [])[0] as SessionRow | undefined;
-      if (last) {
-        setLastSession(last);
-        const { data: spots } = await supabase
-          .from("session_spots")
-          .select("attempts, makes")
-          .eq("session_id", last.id);
-        const sp = (spots ?? []) as SpotAgg[];
-        setLastSpots({
-          attempts: sp.reduce((a, s) => a + (s.attempts ?? 0), 0),
-          makes:    sp.reduce((a, s) => a + (s.makes    ?? 0), 0),
-        });
-      } else {
-        setLastSession(null);
-      }
-
-      // Most recent workout (any status)
-      try {
-        const { data: wk } = await supabase
-          .from("workouts")
-          .select("id, title, sessions_goal, status")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false })
-          .limit(1);
-        const w = (wk ?? [])[0] as any;
-        if (w) {
-          // Count completed sessions
-          const { count: doneCount } = await supabase
-            .from("sessions")
-            .select("id", { count: "exact", head: true })
-            .eq("workout_id", w.id)
-            .eq("status", "DONE");
-
-          // Find current IN_PROGRESS session (only relevant if workout is IN_PROGRESS)
-          const { data: activeSess } = await supabase
-            .from("sessions")
-            .select("id")
-            .eq("workout_id", w.id)
-            .eq("status", "IN_PROGRESS")
-            .order("session_number", { ascending: false })
-            .limit(1);
-
-          setInProgressWorkout({
-            id: w.id,
-            title: w.title,
-            status: w.status,
-            sessionsGoal: w.sessions_goal ?? 0,
-            completedSessions: doneCount ?? 0,
-            currentSessionId: (activeSess ?? [])[0]?.id ?? null,
-          });
-        } else {
-          setInProgressWorkout(null);
-        }
-      } catch { setInProgressWorkout(null); }
-
-    } finally {
-      setLoadingStats(false);
-    }
-  }, []);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  }, [loadData]);
-
-  async function onContinueWorkout() {
-    if (!inProgressWorkout || startingSession) return;
-
-    // Never exceed the sessions goal
-    if (
-      !inProgressWorkout.currentSessionId &&
-      inProgressWorkout.completedSessions >= inProgressWorkout.sessionsGoal
-    ) return;
-
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    // Resume existing IN_PROGRESS session without creating a new one
-    if (inProgressWorkout.currentSessionId) {
-      router.push({
-        pathname: "/(tabs)/session/run",
-        params: {
-          sessionId: inProgressWorkout.currentSessionId,
-          workoutId: inProgressWorkout.id,
-        },
-      });
-      return;
-    }
-
-    // No active session yet for today — create it via RPC
-    try {
-      setStartingSession(true);
-      const { data: rpcData, error: rpcErr } = await supabase
-        .rpc("create_next_workout_session", { p_workout_id: inProgressWorkout.id });
-      if (rpcErr) throw rpcErr;
-      const newSessionId = (rpcData as any).session_id as string;
-      router.push({
-        pathname: "/(tabs)/session/run",
-        params: { sessionId: newSessionId, workoutId: inProgressWorkout.id },
-      });
-    } catch (e: any) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      alert(e?.message ?? "No se pudo iniciar la sesión.");
-    } finally {
-      setStartingSession(false);
-    }
-  }
-
-  async function onLogout() {
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await supabase.auth.signOut();
-  }
-
-  const lastPct = lastSpots.attempts > 0 ? lastSpots.makes / lastSpots.attempts : null;
-  const lastPctStr = lastPct !== null ? `${Math.round(lastPct * 100)}%` : "";
-  const lastLabel = lastSession?.title
-    ?? (lastSession?.started_at ? new Date(lastSession.started_at).toLocaleDateString() : "Última sesión");
-  const lastDate = lastSession?.started_at
-    ? new Date(lastSession.started_at).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" })
-    : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
@@ -675,24 +460,6 @@ function PillBtn({ children, onPress }: { children: React.ReactNode; onPress: ()
   );
 }
 
-function SpringBtn({
-  children, onPress, style,
-}: {
-  children: React.ReactNode; onPress: () => void; style?: object;
-}) {
-  const { scale, onIn, onOut } = usePressScale();
-  return (
-    <Animated.View style={{ transform: [{ scale }] }}>
-      <Pressable
-        onPressIn={onIn} onPressOut={onOut} onPress={onPress}
-        style={style}
-      >
-        {children}
-      </Pressable>
-    </Animated.View>
-  );
-}
-
 function StatCard({
   title, icon, loading, isSmall, children,
 }: {
@@ -712,10 +479,6 @@ function StatCard({
     </View>
   );
 }
-
-//  Shared styles 
-
-import React from "react";
 const card = {
   padding: 16, borderRadius: 20,
   backgroundColor: "rgba(255,255,255,0.055)",

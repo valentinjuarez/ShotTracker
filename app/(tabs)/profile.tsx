@@ -1,18 +1,19 @@
 // app/(tabs)/profile.tsx
-import { supabase } from "@/src/lib/supabase";
+import { deleteOwnAuthUser, getCurrentUserId, getCurrentUserIdentity, signOut } from "@/src/features/auth/services/auth.service";
+import { deleteUserAccount, getUserStats } from "@/src/features/profile/services/profile.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    RefreshControl,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  View,
 } from "react-native";
 
 function pctColor(p: number) {
@@ -49,57 +50,18 @@ export default function Profile() {
 
   const loadData = useCallback(async () => {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
-      const meta: any = auth.user?.user_metadata ?? {};
-      setName(meta.display_name ?? meta.username ?? "");
-      setEmail(auth.user?.email ?? "");
+      const identity = await getCurrentUserIdentity();
+      setName(identity.displayName);
+      setEmail(identity.email);
+
+      const userId = identity.id;
       if (!userId) return;
 
-      // Collect ALL session IDs: free sessions (user_id) + workout sessions (workout_id in user's workouts)
-      const { data: userWorkouts } = await supabase
-        .from("workouts").select("id").eq("user_id", userId);
-      const workoutIds = (userWorkouts ?? []).map((w: any) => w.id as string);
-
-      const [{ data: freeSess }, { data: wkSess }] = await Promise.all([
-        supabase.from("sessions").select("id").eq("user_id", userId),
-        workoutIds.length > 0
-          ? supabase.from("sessions").select("id").in("workout_id", workoutIds)
-          : Promise.resolve({ data: [] }),
-      ]);
-
-      const ids = [
-        ...new Set([
-          ...(freeSess ?? []).map((s: any) => s.id as string),
-          ...(wkSess  ?? []).map((s: any) => s.id as string),
-        ]),
-      ];
-      setTotalSessions(ids.length);
-
-      if (ids.length > 0) {
-        const { data: spots } = await supabase
-          .from("session_spots")
-          .select("session_id, attempts, makes")
-          .in("session_id", ids);
-
-        const sp = (spots ?? []) as { session_id: string; attempts: number; makes: number }[];
-        const att = sp.reduce((a, s) => a + (s.attempts ?? 0), 0);
-        const mk  = sp.reduce((a, s) => a + (s.makes ?? 0), 0);
-        setTotalAttempts(att);
-        setTotalMakes(mk);
-
-        // best session pct
-        const bySession: Record<string, { att: number; mk: number }> = {};
-        sp.forEach((s) => {
-          if (!bySession[s.session_id]) bySession[s.session_id] = { att: 0, mk: 0 };
-          bySession[s.session_id].att += s.attempts ?? 0;
-          bySession[s.session_id].mk += s.makes ?? 0;
-        });
-        const pcts = Object.values(bySession)
-          .filter((v) => v.att > 0)
-          .map((v) => v.mk / v.att);
-        setBestPct(pcts.length > 0 ? Math.max(...pcts) : null);
-      }
+      const stats = await getUserStats(userId);
+      setTotalSessions(stats.totalSessions);
+      setTotalAttempts(stats.totalAttempts);
+      setTotalMakes(stats.totalMakes);
+      setBestPct(stats.bestPct);
     } catch {
       // silent
     } finally {
@@ -117,7 +79,7 @@ export default function Profile() {
 
   async function onLogout() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await supabase.auth.signOut();
+    await signOut();
   }
 
   function onDeleteAccount() {
@@ -132,40 +94,16 @@ export default function Profile() {
           style: "destructive",
           onPress: async () => {
             try {
-              const { data: auth } = await supabase.auth.getUser();
-              const userId = auth.user?.id;
+              const userId = await getCurrentUserId();
               if (!userId) return;
 
-              // Delete spots for ALL sessions (free + workout)
-              const { data: userWorkouts } = await supabase
-                .from("workouts").select("id").eq("user_id", userId);
-              const workoutIds = (userWorkouts ?? []).map((w: any) => w.id as string);
+              await deleteUserAccount(userId);
 
-              const [{ data: freeSess }, { data: wkSess }] = await Promise.all([
-                supabase.from("sessions").select("id").eq("user_id", userId),
-                workoutIds.length > 0
-                  ? supabase.from("sessions").select("id").in("workout_id", workoutIds)
-                  : Promise.resolve({ data: [] as any[] }),
-              ]);
-              const allSessionIds = [
-                ...new Set([
-                  ...(freeSess ?? []).map((s: any) => s.id as string),
-                  ...(wkSess  ?? []).map((s: any) => s.id as string),
-                ]),
-              ];
+              // Remove auth.users row through security-definer RPC.
+              await deleteOwnAuthUser();
 
-              if (allSessionIds.length > 0) {
-                await supabase.from("session_spots").delete().in("session_id", allSessionIds);
-                await supabase.from("sessions").delete().in("id", allSessionIds);
-              }
-              if (workoutIds.length > 0) {
-                await supabase.from("workouts").delete().in("id", workoutIds);
-              }
-              await supabase.from("team_members").delete().eq("user_id", userId);
-              await supabase.from("profiles").delete().eq("id", userId);
-              // Eliminar el registro de autenticación (requerido por Apple)
-              await supabase.rpc("delete_own_auth_user");
-              await supabase.auth.signOut();
+              // Session may already be invalid after auth-user deletion.
+              await signOut().catch(() => {});
             } catch {
               Alert.alert("Error", "No se pudo eliminar la cuenta.");
             }

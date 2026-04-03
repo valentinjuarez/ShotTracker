@@ -1,27 +1,16 @@
 // app/(trainer)/_layout.tsx
-import { HapticTab } from "@/components/haptic-tab";
-import { IconSymbol } from "@/components/ui/icon-symbol";
+import { IconSymbol } from "@/src/shared/components/ui/icon-symbol";
+import { createTabOptions } from "@/src/shared/navigation/createTabOptions";
 import { Tabs } from "expo-router";
 import React from "react";
 
-const AMBER = "#F59E0B";
-const INACTIVE = "rgba(255,255,255,0.35)";
-const BG = "#0F1A2E";
+const tabOptions = createTabOptions();
 
 export default function TrainerLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: false,
-        tabBarButton: HapticTab,
-        tabBarActiveTintColor: AMBER,
-        tabBarInactiveTintColor: INACTIVE,
-        tabBarStyle: {
-          backgroundColor: BG,
-          borderTopColor: "rgba(255,255,255,0.07)",
-          borderTopWidth: 1,
-        },
-        tabBarLabelStyle: { fontSize: 10, fontWeight: "700", letterSpacing: 0.2 },
+        ...tabOptions,
       }}
     >
       <Tabs.Screen

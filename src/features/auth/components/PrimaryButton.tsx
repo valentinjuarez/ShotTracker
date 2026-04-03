@@ -36,9 +36,7 @@ export function PrimaryButton({
       {loading ? (
         <ActivityIndicator />
       ) : (
-        <Text style={{ fontWeight: "800", color: "#0B1220", fontSize: 15 }}>
-          {title}
-        </Text>
+        <Text style={{ fontWeight: "800", color: "#0B1220", fontSize: 15 }}>{title}</Text>
       )}
     </Pressable>
   );

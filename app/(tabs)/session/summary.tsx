@@ -1,39 +1,31 @@
 ﻿// app/session/summary.tsx
 import { ALL_SPOTS } from "@/src/data/spots";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserMetadata } from "@/src/features/auth/services/auth.service";
+import { useSessionSummaryController } from "@/src/features/session/hooks/useSessionSummaryController";
+import {
+    getSessionSpotsForPdf,
+    getWorkoutSessionsForPdf,
+} from "@/src/features/session/services/session.service";
 import { Ionicons } from "@expo/vector-icons";
 import { File } from "expo-file-system/next";
 import * as Haptics from "expo-haptics";
 import * as Print from "expo-print";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    useWindowDimensions,
+    View,
 } from "react-native";
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type SessionSpotRow = {
-  id: string;
-  session_id: string;
-  spot_key: string;
-  shot_type: "2PT" | "3PT";
-  target_attempts: number;
-  attempts: number;
-  makes: number;
-  order_index: number;
-};
 
 // ─── Color helpers ────────────────────────────────────────────────────────────
 
@@ -103,14 +95,6 @@ function usePressScale() {
   return { scale, onIn, onOut };
 }
 
-type WorkoutData = {
-  id: string;
-  title: string;
-  shot_type: string;
-  sessions_goal: number;
-  target_per_spot: number;
-};
-
 type PdfSessionRow = {
   session_number: number;
   spotRows: { spot_key: string; makes: number; attempts: number; target_attempts: number; order_index: number }[];
@@ -125,19 +109,28 @@ export default function SessionSummary() {
   const courtW = Math.min(width - (isSmall ? 32 : 40) - 32, 520);
   const courtH = Math.round(courtW * 1.08);
 
-  const { sessionId, workoutId } = useLocalSearchParams<{ sessionId?: string; workoutId?: string }>();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [rows, setRows] = useState<SessionSpotRow[]>([]);
-  const [mode, setMode] = useState<"HEAT" | "LIST">("HEAT");
-  const [selectedSpotKey, setSelectedSpotKey] = useState<string | null>(null);
-
-  // ─── Workout mode state ───────────────────────────────────────────────────
-  const [workout, setWorkout]               = useState<WorkoutData | null>(null);
-  const [completedSessions, setCompletedSessions] = useState(0);
-  const [savingNext, setSavingNext]         = useState(false);
-  const [pdfLoading, setPdfLoading]         = useState(false);
-  const [shareLoading, setShareLoading]     = useState(false);
+  const {
+    completedSessions,
+    createNextSession,
+    handleShareTeam,
+    loading,
+    mode,
+    onRefresh,
+    pdfLoading,
+    refreshing,
+    rows,
+    savingNext,
+    selectedMeta,
+    selectedRow,
+    selectedSpotKey,
+    setMode,
+    setPdfLoading,
+    setSelectedSpotKey,
+    shareLoading,
+    spotMetaByKey,
+    stats,
+    workout,
+  } = useSessionSummaryController();
 
   const headerAnim  = useFadeSlide(0);
   const toggleAnim  = useFadeSlide(80);
@@ -146,91 +139,6 @@ export default function SessionSummary() {
   const bodyAnim    = useFadeSlide(320);
   const actionsAnim = useFadeSlide(400);
 
-  const loadData = useCallback(async (opts?: { isRefresh?: boolean }) => {
-    if (!sessionId) { Alert.alert("Error", "Falta sessionId."); router.back(); return; }
-    try {
-      if (!opts?.isRefresh) setLoading(true);
-      const { data, error } = await supabase
-        .from("session_spots")
-        .select("id, session_id, spot_key, shot_type, target_attempts, attempts, makes, order_index")
-        .eq("session_id", sessionId)
-        .order("order_index", { ascending: true });
-      if (error) throw error;
-      const r = (data ?? []) as SessionSpotRow[];
-      if (!r.length) { Alert.alert("Sin datos", "No hay tiros registrados."); router.back(); return; }
-      setRows(r);
-      setSelectedSpotKey((prev) => prev ?? r[0]?.spot_key ?? null);
-    } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "No se pudo cargar el resumen."); router.back();
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [sessionId, router]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadData({ isRefresh: true });
-  }, [loadData]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  // Load workout metadata + completed count when in workout mode
-  // completedSessions = session_number of the current session (reliable, no race condition)
-  useEffect(() => {
-    if (!workoutId) {
-      // Free session or navigated without workoutId — reset workout state to
-      // prevent stale data from a previous workout summary showing "Planilla completada"
-      setWorkout(null);
-      setCompletedSessions(0);
-      return;
-    }
-    (async () => {
-      const [{ data: wkData }, { data: sessData }] = await Promise.all([
-        supabase
-          .from("workouts")
-          .select("id, title, shot_type, sessions_goal, target_per_spot")
-          .eq("id", workoutId)
-          .single(),
-        supabase
-          .from("sessions")
-          .select("session_number")
-          .eq("id", sessionId ?? "")
-          .single(),
-      ]);
-      if (wkData) setWorkout(wkData as WorkoutData);
-      // session_number IS the completed count: session 1 finished = 1 done, session 3 finished = 3 done
-      setCompletedSessions(sessData?.session_number ?? 0);
-    })();
-  }, [workoutId, sessionId]);
-
-  // Create the next session of the workout and navigate to run screen
-  async function createNextSession() {
-    if (!workoutId || !workout) return;
-    try {
-      setSavingNext(true);
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-      const { data: rpcData, error: rpcErr } = await supabase
-        .rpc("create_next_workout_session", { p_workout_id: workoutId });
-      if (rpcErr) throw rpcErr;
-
-      const nextSessionId = (rpcData as any).session_id as string;
-
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace({
-        pathname: "/session/run",
-        params: { sessionId: nextSessionId, workoutId },
-      });
-    } catch (e: any) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Error", e?.message ?? "No se pudo iniciar la siguiente sesión.");
-    } finally {
-      setSavingNext(false);
-    }
-  }
 
   async function handlePdf() {
     try {
@@ -241,20 +149,9 @@ export default function SessionSummary() {
 
       if (workout && completedSessions >= workout.sessions_goal) {
         // ── Planilla completada: buscar TODAS las sesiones ────────────────
-        const { data: allSess, error: sessErr } = await supabase
-          .from("sessions")
-          .select("id, session_number")
-          .eq("workout_id", workout.id)
-          .neq("status", "PENDING")
-          .order("session_number", { ascending: true });
-        if (sessErr) throw sessErr;
-
+        const allSess = await getWorkoutSessionsForPdf(workout.id);
         const sessIds = (allSess ?? []).map((s: any) => s.id as string);
-        const { data: allSpots, error: spotErr } = await supabase
-          .from("session_spots")
-          .select("session_id, spot_key, makes, attempts, target_attempts, order_index")
-          .in("session_id", sessIds);
-        if (spotErr) throw spotErr;
+        const allSpots = await getSessionSpotsForPdf(sessIds);
 
         const sessMap = new Map<string, PdfSessionRow>();
         (allSess ?? []).forEach((s: any) =>
@@ -282,9 +179,9 @@ export default function SessionSummary() {
       const { uri } = await Print.printToFileAsync({ html, base64: false });
 
       // Renombrar con el nombre del usuario
-      const { data: authData } = await supabase.auth.getUser();
-      const rawName: string = authData.user?.user_metadata?.display_name
-        ?? authData.user?.user_metadata?.username
+      const userMetadata = await getCurrentUserMetadata();
+      const rawName: string = (userMetadata.display_name as string | undefined)
+        ?? (userMetadata.username as string | undefined)
         ?? "jugador";
       const safeName = rawName
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")  // quitar tildes
@@ -305,86 +202,6 @@ export default function SessionSummary() {
       setPdfLoading(false);
     }
   }
-
-  async function handleShareTeam() {
-    if (!workout) return;
-    try {
-      setShareLoading(true);
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
-      if (!userId) return;
-
-      // Equipo del jugador
-      const { data: membership } = await supabase
-        .from("team_members")
-        .select("team_id")
-        .eq("user_id", userId)
-        .eq("role", "player")
-        .maybeSingle();
-
-      if (!membership) {
-        Alert.alert("Sin equipo", "No estás unido a ningún equipo todavía.");
-        return;
-      }
-      const teamId = (membership as any).team_id as string;
-
-      // ¿Ya compartida?
-      const { data: existing } = await supabase
-        .from("team_workouts")
-        .select("id")
-        .eq("workout_id", workout.id)
-        .eq("team_id", teamId)
-        .maybeSingle();
-
-      if (existing) {
-        Alert.alert("Ya compartida", "Esta planilla ya fue compartida con tu equipo.");
-        return;
-      }
-
-      await supabase.from("team_workouts").insert({
-        workout_id:     workout.id,
-        team_id:        teamId,
-        user_id:        userId,
-        workout_title:  workout.title,
-        workout_status: "COMPLETED",
-        shot_type:      workout.shot_type,
-        sessions_goal:  workout.sessions_goal,
-        shared_at:      new Date().toISOString(),
-      });
-
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("¡Compartida! 🎉", "Tu planilla fue compartida con el equipo. El entrenador ya puede verla.");
-    } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "No se pudo compartir con el equipo.");
-    } finally {
-      setShareLoading(false);
-    }
-  }
-
-  const stats = useMemo(() => {
-    const totalAttempts = rows.reduce((acc, r) => acc + (r.attempts ?? 0), 0);
-    const totalMakes    = rows.reduce((acc, r) => acc + (r.makes ?? 0), 0);
-    const pct = totalAttempts > 0 ? totalMakes / totalAttempts : 0;
-    const perSpot = rows.map((r) => ({ ...r, pct: r.attempts > 0 ? r.makes / r.attempts : 0 }));
-    const sorted  = [...perSpot].sort((a, b) => b.pct - a.pct);
-    const mean = perSpot.reduce((acc, r) => acc + r.pct, 0) / Math.max(1, perSpot.length);
-    const std  = Math.sqrt(perSpot.reduce((acc, r) => acc + Math.pow(r.pct - mean, 2), 0) / Math.max(1, perSpot.length));
-    return { totalAttempts, totalMakes, pct, perSpot, best: sorted[0], worst: sorted[sorted.length - 1], mean, std };
-  }, [rows]);
-
-  const spotMetaByKey = useMemo(() => {
-    const map = new Map<string, (typeof ALL_SPOTS)[number]>();
-    ALL_SPOTS.forEach((s) => map.set(s.id, s));
-    return map;
-  }, []);
-
-  const selectedRow  = useMemo(
-    () => stats.perSpot.find((r) => r.spot_key === selectedSpotKey) ?? null,
-    [selectedSpotKey, stats.perSpot]
-  );
-  const selectedMeta = selectedSpotKey ? spotMetaByKey.get(selectedSpotKey) : null;
 
   function pctLabel(p: number) { return `${Math.round(p * 100)}%`; }
   async function onHaptic(style = Haptics.ImpactFeedbackStyle.Light) {

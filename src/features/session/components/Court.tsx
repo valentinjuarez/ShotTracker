@@ -18,12 +18,10 @@ export function Court({
   onToggleSpot: (id: string) => void;
   highlightedSpotId?: string;
 }) {
-  // "padding" interno del dibujo
   const padX = width * 0.04;
   const padTop = height * 0.03;
   const padBottom = height * 0.04;
 
-  // límites de la media cancha
   const left = padX;
   const right = width - padX;
   const top = padTop;
@@ -32,23 +30,17 @@ export function Court({
   const courtW = right - left;
   const courtH = bottom - top;
 
-  // aro / tablero
   const rimX = left + courtW * 0.5;
   const rimY = top + courtH * 0.11;
 
-  // zona pintada / key
-  const keyW = courtW * 0.40;
+  const keyW = courtW * 0.4;
   const keyH = courtH * 0.36;
   const keyX = rimX - keyW / 2;
   const keyY = top;
 
-  // línea tiro libre
   const ftY = keyY + keyH;
+  const ftArcR = keyW * 0.3;
 
-  // medialuna TL (hacia adentro / arriba)
-  const ftArcR = keyW * 0.30;
-
-  // triple: laterales + arco
   const cornerXLeft = left + courtW * 0.12;
   const cornerXRight = right - courtW * 0.12;
   const threeArcR = courtW * 0.382;
@@ -73,10 +65,8 @@ export function Court({
       }}
     >
       <Svg width={width} height={height}>
-        {/* Fondo */}
         <Rect x="0" y="0" width={width} height={height} fill="rgba(0,0,0,0.25)" />
 
-        {/* Contorno media cancha */}
         <Rect
           x={left}
           y={top}
@@ -88,7 +78,6 @@ export function Court({
           rx={12}
         />
 
-        {/* Key / pintura */}
         <Rect
           x={keyX}
           y={keyY}
@@ -99,7 +88,6 @@ export function Court({
           strokeWidth={2}
         />
 
-        {/* Línea de tiro libre */}
         <Line
           x1={keyX}
           y1={ftY}
@@ -109,7 +97,6 @@ export function Court({
           strokeWidth={2}
         />
 
-        {/* Medialuna del tiro libre (hacia ARRIBA / hacia el aro) */}
         <Path
           d={describeArc(rimX, ftY, ftArcR, 270, 90, true)}
           fill="none"
@@ -117,17 +104,15 @@ export function Court({
           strokeWidth={2}
         />
 
-        {/* Tablero */}
         <Line
-          x1={rimX - keyW * 0.20}
+          x1={rimX - keyW * 0.2}
           y1={rimY - 12}
-          x2={rimX + keyW * 0.20}
+          x2={rimX + keyW * 0.2}
           y2={rimY - 12}
           stroke="rgba(255,255,255,0.24)"
           strokeWidth={3}
         />
 
-        {/* Aro */}
         <Circle
           cx={rimX}
           cy={rimY}
@@ -137,7 +122,6 @@ export function Court({
           strokeWidth={2}
         />
 
-        {/* Triple: líneas rectas de esquina */}
         <Line
           x1={cornerXLeft}
           y1={top}
@@ -155,7 +139,6 @@ export function Court({
           strokeWidth={2}
         />
 
-        {/* Triple: arco (centrado en el aro) */}
         <Path
           d={describeArc(rimX, rimY, threeArcR, threeStartAngle, threeEndAngle, true)}
           fill="none"
@@ -163,23 +146,17 @@ export function Court({
           strokeWidth={2}
         />
 
-        {/* Spots */}
         {spots.map((s) => {
           const cx = left + s.x * courtW;
           const cy = top + s.y * courtH;
           const selected = selectedIds.has(s.id);
           const highlighted = highlightedSpotId === s.id;
 
-          const stroke =
-            s.shotType === "3PT"
-              ? "rgba(245,158,11,0.90)"
-              : "rgba(34,197,94,0.90)";
-
+          const stroke = s.shotType === "3PT" ? "rgba(245,158,11,0.90)" : "rgba(34,197,94,0.90)";
           const fill = selected ? stroke : "rgba(255,255,255,0.06)";
 
           return (
             <React.Fragment key={s.id}>
-              {/* Destacado: círculo pulsante */}
               {highlighted && (
                 <Circle
                   cx={cx}
@@ -191,16 +168,8 @@ export function Court({
                 />
               )}
 
-              {/* Área de toque grande */}
-              <Circle
-                cx={cx}
-                cy={cy}
-                r={36}
-                fill="transparent"
-                onPress={() => onToggleSpot(s.id)}
-              />
+              <Circle cx={cx} cy={cy} r={36} fill="transparent" onPress={() => onToggleSpot(s.id)} />
 
-              {/* Punto */}
               <Circle
                 cx={cx}
                 cy={cy}
@@ -224,7 +193,6 @@ export function Court({
           );
         })}
 
-        {/* Leyenda */}
         <Line
           x1={left + 10}
           y1={bottom - 12}
@@ -253,7 +221,6 @@ export function Court({
   );
 }
 
-// Helpers para arco
 function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
   const angleRad = ((angleDeg - 90) * Math.PI) / 180.0;
   return { x: cx + r * Math.cos(angleRad), y: cy + r * Math.sin(angleRad) };

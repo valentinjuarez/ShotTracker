@@ -1,28 +1,20 @@
 // app/(tabs)/history.tsx
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
+import { deleteSession, getSessionHistory, getSessionsWithPercentages, type SessionRow } from "@/src/features/session/services/session.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    RefreshControl,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  View,
 } from "react-native";
-
-type SessionRow = {
-  id: string;
-  title: string | null;
-  status: string;
-  started_at: string | null;
-  finished_at: string | null;
-  workout_id: string | null;
-};
 
 function pctColor(p: number) {
   if (p >= 0.65) return "rgba(34,197,94,1)";
@@ -39,65 +31,19 @@ export default function History() {
 
   const loadData = useCallback(async () => {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const userId = await getCurrentUserId();
       if (!userId) return;
 
-      // Get all session IDs: free sessions (user_id) + workout sessions (via workout_id)
-      const { data: userWorkouts } = await supabase
-        .from("workouts").select("id").eq("user_id", userId);
-      const workoutIds = (userWorkouts ?? []).map((w: any) => w.id as string);
-
-      const [{ data: freeSess }, { data: wkSess }] = await Promise.all([
-        supabase.from("sessions").select("id").eq("user_id", userId),
-        workoutIds.length > 0
-          ? supabase.from("sessions").select("id").in("workout_id", workoutIds)
-          : Promise.resolve({ data: [] as any[] }),
-      ]);
-      const allIds = [
-        ...new Set([
-          ...(freeSess ?? []).map((s: any) => s.id as string),
-          ...(wkSess  ?? []).map((s: any) => s.id as string),
-        ]),
-      ];
-
-      if (!allIds.length) { setSessions([]); return; }
-
-      const { data, error } = await supabase
-        .from("sessions")
-        .select("id, title, status, started_at, finished_at, workout_id")
-        .in("id", allIds)
-        .not("started_at", "is", null)
-        .order("started_at", { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-      const rows = (data ?? []) as SessionRow[];
+      const rows = await getSessionHistory(userId);
       setSessions(rows);
 
       // fetch pct for each session
       if (rows.length > 0) {
         const ids = rows.map((r) => r.id);
-        const { data: spots } = await supabase
-          .from("session_spots")
-          .select("session_id, attempts, makes")
-          .in("session_id", ids);
-
-        const map: Record<string, { att: number; mk: number }> = {};
-        (spots ?? []).forEach((s: any) => {
-          if (!map[s.session_id]) map[s.session_id] = { att: 0, mk: 0 };
-          map[s.session_id].att += s.attempts ?? 0;
-          map[s.session_id].mk += s.makes ?? 0;
-        });
-
-        const pctMap: Record<string, number | null> = {};
-        rows.forEach((r) => {
-          const agg = map[r.id];
-          pctMap[r.id] = agg && agg.att > 0 ? agg.mk / agg.att : null;
-        });
+        const pctMap = await getSessionsWithPercentages(ids);
         setPcts(pctMap);
       }
-    } catch (e) {
+    } catch {
       // silent
     } finally {
       setLoading(false);
@@ -112,7 +58,7 @@ export default function History() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  function deleteSession(session: SessionRow) {
+  function confirmDeleteSession(session: SessionRow) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const isWorkout = !!session.workout_id;
     Alert.alert(
@@ -127,8 +73,7 @@ export default function History() {
           style: "destructive",
           onPress: async () => {
             try {
-              await supabase.from("session_spots").delete().eq("session_id", session.id);
-              await supabase.from("sessions").delete().eq("id", session.id);
+              await deleteSession(session.id);
               setSessions((prev) => prev.filter((s) => s.id !== session.id));
               setPcts((prev) => { const n = { ...prev }; delete n[session.id]; return n; });
               await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -226,7 +171,7 @@ export default function History() {
 
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <Pressable
-                    onPress={(e) => { e.stopPropagation(); deleteSession(session); }}
+                    onPress={(e) => { e.stopPropagation(); confirmDeleteSession(session); }}
                     hitSlop={10}
                     style={{
                       width: 32, height: 32, borderRadius: 10,

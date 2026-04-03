@@ -1,6 +1,7 @@
 ﻿// app/(trainer)/players.tsx  — All players detail view
 import { ALL_SPOTS } from "@/src/data/spots";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
+import { getCoachPlayersDetailed } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -106,129 +107,10 @@ export default function PlayersScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const userId = await getCurrentUserId();
       if (!userId) return;
-
-      const { data: membership } = await supabase
-        .from("team_members")
-        .select("team_id")
-        .eq("user_id", userId)
-        .eq("role", "coach")
-        .maybeSingle();
-
-      if (!membership) { setPlayers([]); return; }
-      const teamId = (membership as any).team_id as string;
-
-      const { data: members } = await supabase
-        .from("team_members")
-        .select("user_id")
-        .eq("team_id", teamId)
-        .eq("role", "player");
-
-      const playerIds: string[] = (members ?? []).map((m: any) => m.user_id);
-      if (!playerIds.length) { setPlayers([]); return; }
-
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, display_name")
-        .in("id", playerIds);
-
-      const nameMap: Record<string, string | null> = {};
-      (profiles ?? []).forEach((p: any) => { nameMap[p.id] = p.display_name; });
-
-      const { data: sessions } = await supabase
-        .from("sessions")
-        .select("id, user_id, started_at")
-        .in("user_id", playerIds)
-        .order("started_at", { ascending: false });
-
-      // Also collect workout sessions (workout_id in user's workouts)
-      const { data: playerWorkouts } = await supabase
-        .from("workouts")
-        .select("id, user_id")
-        .in("user_id", playerIds);
-      const wkIds = (playerWorkouts ?? []).map((w: any) => w.id as string);
-      const workoutOwnerMap: Record<string, string> = {};
-      (playerWorkouts ?? []).forEach((w: any) => { workoutOwnerMap[w.id] = w.user_id; });
-
-      let workoutSessions: any[] = [];
-      if (wkIds.length > 0) {
-        const { data: ws } = await supabase
-          .from("sessions")
-          .select("id, workout_id, started_at")
-          .in("workout_id", wkIds)
-          .order("started_at", { ascending: false });
-        workoutSessions = ws ?? [];
-      }
-
-      // Build combined sessions with a reliable player mapping
-      const freeRows = (sessions ?? []).map((s: any) => ({ id: s.id, user_id: s.user_id, started_at: s.started_at }));
-      const wkRows   = workoutSessions.map((s: any) => ({ id: s.id, user_id: workoutOwnerMap[s.workout_id] ?? null, started_at: s.started_at }));
-      const allRows  = [...freeRows];
-      const seenIds  = new Set(freeRows.map((r) => r.id));
-      wkRows.forEach((r) => { if (r.user_id && !seenIds.has(r.id)) { allRows.push(r); seenIds.add(r.id); } });
-
-      const sessionsByPlayer: Record<string, string[]> = {};
-      const lastActiveMap: Record<string, string> = {};
-      allRows.forEach((s) => {
-        if (!s.user_id) return;
-        if (!sessionsByPlayer[s.user_id]) sessionsByPlayer[s.user_id] = [];
-        sessionsByPlayer[s.user_id].push(s.id);
-        if (!lastActiveMap[s.user_id]) lastActiveMap[s.user_id] = s.started_at;
-      });
-
-      const allSessionIds = allRows.map((s) => s.id);
-      let spotsData: any[] = [];
-      if (allSessionIds.length > 0) {
-        const { data: spots } = await supabase
-          .from("session_spots")
-          .select("session_id, spot_key, shot_type, attempts, makes")
-          .in("session_id", allSessionIds);
-        spotsData = spots ?? [];
-      }
-
-      const sessionPlayerMap: Record<string, string> = {};
-      allRows.forEach((s) => { if (s.user_id) sessionPlayerMap[s.id] = s.user_id; });
-
-      type SpotKey = string;
-      const spotsByPlayer: Record<string, Record<SpotKey, { shot_type: string; att: number; mk: number }>> = {};
-      spotsData.forEach((sp: any) => {
-        const uid = sessionPlayerMap[sp.session_id];
-        if (!uid) return;
-        if (!spotsByPlayer[uid]) spotsByPlayer[uid] = {};
-        if (!spotsByPlayer[uid][sp.spot_key]) spotsByPlayer[uid][sp.spot_key] = { shot_type: sp.shot_type, att: 0, mk: 0 };
-        spotsByPlayer[uid][sp.spot_key].att += sp.attempts ?? 0;
-        spotsByPlayer[uid][sp.spot_key].mk  += sp.makes    ?? 0;
-      });
-
-      const result: PlayerDetail[] = playerIds.map((uid) => {
-        const spots = spotsByPlayer[uid] ?? {};
-        const breakdown: SpotBreakdown[] = Object.entries(spots)
-          .map(([key, v]) => ({
-            spot_key: key, shot_type: v.shot_type,
-            attempts: v.att, makes: v.mk,
-            pct: v.att > 0 ? v.mk / v.att : 0,
-          }))
-          .sort((a, b) => b.pct - a.pct);
-
-        const att = breakdown.reduce((a, s) => a + s.attempts, 0);
-        const mk  = breakdown.reduce((a, s) => a + s.makes, 0);
-
-        return {
-          user_id:       uid,
-          display_name:  nameMap[uid] ?? null,
-          sessions:      (sessionsByPlayer[uid] ?? []).length,
-          attempts:      att,
-          makes:         mk,
-          pct:           att > 0 ? mk / att : null,
-          lastActive:    lastActiveMap[uid] ?? null,
-          spotBreakdown: breakdown,
-        };
-      });
-
-      result.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));
-      setPlayers(result);
+      const result = await getCoachPlayersDetailed(userId);
+      setPlayers(result as PlayerDetail[]);
     } catch {
       // silent
     } finally {
@@ -358,6 +240,7 @@ function PlayerRow({ player, rank, onPress }: { player: PlayerDetail; rank: numb
   const hasPct = player.pct !== null;
   const color  = hasPct ? pctColor(player.pct!) : "rgba(255,255,255,0.30)";
   const pctVal = hasPct ? Math.round(player.pct! * 100) : null;
+  const pctBarWidth: `${number}%` = `${pctVal ?? 0}%`;
 
   return (
     <Pressable
@@ -411,7 +294,7 @@ function PlayerRow({ player, rank, onPress }: { player: PlayerDetail; rank: numb
         {/* Mini pct bar */}
         {hasPct && (
           <View style={{ height: 3, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.07)", overflow: "hidden", marginTop: 2 }}>
-            <View style={{ width: `${pctVal}%`, height: "100%", borderRadius: 999, backgroundColor: color }} />
+            <View style={{ width: pctBarWidth, height: "100%", borderRadius: 999, backgroundColor: color }} />
           </View>
         )}
       </View>

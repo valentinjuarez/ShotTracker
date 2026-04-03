@@ -1,12 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
 import {
-    Platform,
-    Pressable,
-    Text,
-    TextInput,
-    useWindowDimensions,
-    View,
+  Platform,
+  Pressable,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
 } from "react-native";
 
 export function AuthInput({
@@ -49,9 +49,7 @@ export function AuthInput({
 
   return (
     <View style={{ gap: 8 }}>
-      <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 12 }}>
-        {label}
-      </Text>
+      <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 12 }}>{label}</Text>
 
       <View
         style={{
@@ -98,11 +96,7 @@ export function AuthInput({
         )}
       </View>
 
-      {!!error && (
-        <Text style={{ color: "rgba(239,68,68,0.85)", fontSize: 12 }}>
-          {error}
-        </Text>
-      )}
+      {!!error && <Text style={{ color: "rgba(239,68,68,0.85)", fontSize: 12 }}>{error}</Text>}
     </View>
   );
 }

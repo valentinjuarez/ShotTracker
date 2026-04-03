@@ -1,11 +1,10 @@
 // app/(trainer)/index.tsx  — Coach dashboard
-import { useProfile } from "@/src/hooks/useProfile";
-import { supabase } from "@/src/lib/supabase";
+import { useCoachDashboardController } from "@/src/features/team/hooks/useCoachDashboardController";
+import type { PlayerStat } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -25,18 +24,6 @@ function greeting() {
   return "Buenas noches";
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type PlayerStat = {
-  user_id: string;
-  display_name: string | null;
-  sessions: number;
-  attempts: number;
-  makes: number;
-  pct: number | null;
-  lastActive: string | null;
-};
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function pctColor(p: number) {
@@ -49,7 +36,7 @@ function useFadeSlide(delay = 0) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: 1, duration: 420, delay, useNativeDriver: true }).start();
-  }, []);
+  }, [anim, delay]);
   return {
     opacity: anim,
     transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
@@ -66,147 +53,25 @@ const card = {
 
 export default function CoachDashboard() {
   const router = useRouter();
-  const { profile, loading: profileLoading } = useProfile();
-
-  const [team, setTeam]             = useState<{ id: string; name: string; invite_code: string } | null>(null);
-  const [players, setPlayers]       = useState<PlayerStat[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const {
+    displayName,
+    initials,
+    isNameLoading,
+    loading,
+    onLogout,
+    onRefresh,
+    players,
+    refreshing,
+    team,
+    teamPct,
+    totalAttempts,
+    totalSessions,
+  } = useCoachDashboardController();
 
   const headerAnim = useFadeSlide(0);
   const teamAnim   = useFadeSlide(80);
   const statsAnim  = useFadeSlide(160);
   const listAnim   = useFadeSlide(240);
-
-  const loadData = useCallback(async () => {
-    try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
-      if (!userId) return;
-
-      // 1. Find coach's team
-      const { data: membership } = await supabase
-        .from("team_members")
-        .select("team_id, teams(id, name, invite_code)")
-        .eq("user_id", userId)
-        .eq("role", "coach")
-        .maybeSingle();
-
-      if (!membership) { setTeam(null); setPlayers([]); return; }
-      const t = (membership as any).teams as { id: string; name: string; invite_code: string };
-      setTeam(t);
-
-      // 2. Get all player members
-      const { data: members } = await supabase
-        .from("team_members")
-        .select("user_id, role")
-        .eq("team_id", t.id)
-        .eq("role", "player");
-
-      const playerIds: string[] = (members ?? []).map((m: any) => m.user_id);
-      if (!playerIds.length) { setPlayers([]); return; }
-
-      // 3. Get profiles
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, display_name")
-        .in("id", playerIds);
-
-      const nameMap: Record<string, string | null> = {};
-      (profiles ?? []).forEach((p: any) => { nameMap[p.id] = p.display_name; });
-
-      // 4. Get sessions per player
-      const { data: sessions } = await supabase
-        .from("sessions")
-        .select("id, user_id, started_at")
-        .in("user_id", playerIds)
-        .order("started_at", { ascending: false });
-
-      const sessionsByPlayer: Record<string, string[]> = {};
-      const lastActiveMap: Record<string, string> = {};
-      (sessions ?? []).forEach((s: any) => {
-        if (!sessionsByPlayer[s.user_id]) sessionsByPlayer[s.user_id] = [];
-        sessionsByPlayer[s.user_id].push(s.id);
-        if (!lastActiveMap[s.user_id]) lastActiveMap[s.user_id] = s.started_at;
-      });
-
-      const allSessionIds = (sessions ?? []).map((s: any) => s.id);
-
-      // 5. Get spots aggregated
-      let spotsData: any[] = [];
-      if (allSessionIds.length > 0) {
-        const { data: spots } = await supabase
-          .from("session_spots")
-          .select("session_id, attempts, makes")
-          .in("session_id", allSessionIds);
-        spotsData = spots ?? [];
-      }
-
-      // Build session→player map
-      const sessionPlayerMap: Record<string, string> = {};
-      (sessions ?? []).forEach((s: any) => { sessionPlayerMap[s.id] = s.user_id; });
-
-      const aggByPlayer: Record<string, { att: number; mk: number }> = {};
-      spotsData.forEach((sp: any) => {
-        const uid = sessionPlayerMap[sp.session_id];
-        if (!uid) return;
-        if (!aggByPlayer[uid]) aggByPlayer[uid] = { att: 0, mk: 0 };
-        aggByPlayer[uid].att += sp.attempts ?? 0;
-        aggByPlayer[uid].mk  += sp.makes    ?? 0;
-      });
-
-      // 6. Build player stats array
-      const stats: PlayerStat[] = playerIds.map((uid) => {
-        const agg = aggByPlayer[uid];
-        const att = agg?.att ?? 0;
-        const mk  = agg?.mk  ?? 0;
-        return {
-          user_id:     uid,
-          display_name: nameMap[uid] ?? null,
-          sessions:    (sessionsByPlayer[uid] ?? []).length,
-          attempts:    att,
-          makes:       mk,
-          pct:         att > 0 ? mk / att : null,
-          lastActive:  lastActiveMap[uid] ?? null,
-        };
-      });
-
-      // Sort by pct desc, then by sessions desc
-      stats.sort((a, b) =>
-        (b.pct ?? -1) - (a.pct ?? -1) || b.sessions - a.sessions
-      );
-      setPlayers(stats);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadData();
-  }, [loadData]);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  // Aggregate team stats
-  const totalAttempts = players.reduce((a, p) => a + p.attempts, 0);
-  const totalMakes    = players.reduce((a, p) => a + p.makes, 0);
-  const teamPct       = totalAttempts > 0 ? totalMakes / totalAttempts : null;
-  const totalSessions = players.reduce((a, p) => a + p.sessions, 0);
-
-  const displayName   = profile?.display_name ?? null;
-  const isNameLoading = profileLoading && !displayName;
-  const initials = displayName
-    ? displayName.split(" ").filter(Boolean).map((w: string) => w[0]?.toUpperCase() ?? "").slice(0, 2).join("")
-    : "";
-
-  async function onLogout() {
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await supabase.auth.signOut();
-  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>

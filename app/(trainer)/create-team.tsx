@@ -1,5 +1,6 @@
 // app/(trainer)/create-team.tsx — Create team screen
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
+import { createTeam } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
@@ -44,30 +45,11 @@ export default function CreateTeam() {
       setLoading(true);
       setError(null);
 
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user?.id) throw new Error("No autenticado");
-      const userId = auth.user.id;
-
-      // Check if coach already has a team
-      const { data: existing } = await supabase
-        .from("team_members")
-        .select("team_id")
-        .eq("user_id", userId)
-        .eq("role", "coach")
-        .maybeSingle();
-
-      if (existing) {
-        setError("Ya sos entrenador/a de un equipo.");
-        return;
-      }
+      const userId = await getCurrentUserId();
+      if (!userId) throw new Error("No autenticado");
 
       const inviteCode = generateCode();
-
-      // Create team via security definer function (bypasses RLS safely)
-      const { data: team, error: teamErr } = await supabase
-        .rpc("create_team", { team_name: name, invite_code: inviteCode });
-
-      if (teamErr) throw teamErr;
+      const team = await createTeam(userId, name, inviteCode);
 
       setCreated({ name: team.name, code: team.invite_code });
       Animated.spring(successAnim, {

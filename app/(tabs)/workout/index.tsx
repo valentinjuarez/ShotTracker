@@ -1,5 +1,13 @@
 // app/(tabs)/workout/index.tsx
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
+import { deleteSession } from "@/src/features/session/services/session.service";
+import {
+    deleteWorkoutWithSessions,
+    getUserWorkouts,
+    getWorkoutSessions,
+    SessionRow,
+    WorkoutRow,
+} from "@/src/features/workout/services/workout.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -15,26 +23,6 @@ import {
     Text,
     View,
 } from "react-native";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type WorkoutRow = {
-  id: string;
-  title: string;
-  status: string;
-  shot_type: string;
-  sessions_goal: number;
-  created_at: string;
-};
-
-type SessionRow = {
-  id: string;
-  workout_id: string;
-  session_number: number;
-  status: string;
-  finished_at: string | null;
-  pct: number | null;
-};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -83,18 +71,11 @@ export default function WorkoutHistory() {
   const loadData = useCallback(async (isRefresh = false) => {
     try {
       if (!isRefresh) setLoading(true);
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const userId = await getCurrentUserId();
       if (!userId) return;
 
-      const { data, error } = await supabase
-        .from("workouts")
-        .select("id, title, status, shot_type, sessions_goal, created_at")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setWorkouts((data ?? []) as WorkoutRow[]);
+      const workoutsList = await getUserWorkouts(userId);
+      setWorkouts(workoutsList);
     } catch {
       // silent
     } finally {
@@ -114,42 +95,8 @@ export default function WorkoutHistory() {
     if (sessionsMap[workoutId] || loadingSess[workoutId]) return;
     try {
       setLoadingSess((p) => ({ ...p, [workoutId]: true }));
-
-      const { data: sessList } = await supabase
-        .from("sessions")
-        .select("id, workout_id, session_number, status, finished_at")
-        .eq("workout_id", workoutId)
-        .order("session_number", { ascending: true });
-
-      const rows = (sessList ?? []) as Omit<SessionRow, "pct">[];
-
-      // Fetch pct for DONE sessions
-      const doneIds = rows.filter((s) => s.status === "DONE").map((s) => s.id);
-      let pctMap: Record<string, number | null> = {};
-
-      if (doneIds.length > 0) {
-        const { data: spots } = await supabase
-          .from("session_spots")
-          .select("session_id, attempts, makes")
-          .in("session_id", doneIds);
-
-        const agg: Record<string, { att: number; mk: number }> = {};
-        (spots ?? []).forEach((s: any) => {
-          if (!agg[s.session_id]) agg[s.session_id] = { att: 0, mk: 0 };
-          agg[s.session_id].att += s.attempts ?? 0;
-          agg[s.session_id].mk  += s.makes    ?? 0;
-        });
-        doneIds.forEach((id) => {
-          const a = agg[id];
-          pctMap[id] = a && a.att > 0 ? a.mk / a.att : null;
-        });
-      }
-
-      const withPct: SessionRow[] = rows.map((r) => ({
-        ...r, pct: pctMap[r.id] ?? null,
-      }));
-
-      setSessionsMap((p) => ({ ...p, [workoutId]: withPct }));
+      const sessionsWithPct = await getWorkoutSessions(workoutId);
+      setSessionsMap((p) => ({ ...p, [workoutId]: sessionsWithPct }));
     } finally {
       setLoadingSess((p) => ({ ...p, [workoutId]: false }));
     }
@@ -174,16 +121,7 @@ export default function WorkoutHistory() {
           style: "destructive",
           onPress: async () => {
             try {
-              const { data: sids } = await supabase
-                .from("sessions")
-                .select("id")
-                .eq("workout_id", workoutId);
-              const ids = (sids ?? []).map((s: any) => s.id);
-              if (ids.length > 0) {
-                await supabase.from("session_spots").delete().in("session_id", ids);
-                await supabase.from("sessions").delete().in("id", ids);
-              }
-              await supabase.from("workouts").delete().eq("id", workoutId);
+              await deleteWorkoutWithSessions(workoutId);
               setWorkouts((p) => p.filter((w) => w.id !== workoutId));
               setSessionsMap((p) => { const n = { ...p }; delete n[workoutId]; return n; });
             } catch {
@@ -207,8 +145,7 @@ export default function WorkoutHistory() {
           style: "destructive",
           onPress: async () => {
             try {
-              await supabase.from("session_spots").delete().eq("session_id", sessionId);
-              await supabase.from("sessions").delete().eq("id", sessionId);
+              await deleteSession(sessionId);
               setSessionsMap((p) => ({
                 ...p,
                 [workoutId]: (p[workoutId] ?? []).filter((s) => s.id !== sessionId),

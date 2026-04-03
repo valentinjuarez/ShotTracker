@@ -1,18 +1,12 @@
 ﻿// app/session/create.tsx
 import { ALL_SPOTS, DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
-import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
-import { supabase } from "@/src/lib/supabase";
-import { Court } from "@/src/ui/Court";
-import { generateUUID, saveLocalSession } from "@/src/utils/localStore";
-import { enqueueOp } from "@/src/utils/offlineQueue";
+import { Court } from "@/src/features/session/components/Court";
+import { useCreateSessionController } from "@/src/features/session/hooks/useCreateSessionController";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Animated,
     Modal,
     Pressable,
@@ -29,7 +23,7 @@ function useFadeSlide(delay = 0) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: 1, duration: 380, delay, useNativeDriver: true }).start();
-  }, []);
+  }, [anim, delay]);
   return {
     opacity: anim,
     transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] }) }],
@@ -43,36 +37,33 @@ function usePressScale() {
   return { scale, onIn, onOut };
 }
 
-//  Types 
-
-type SelectionMode = "FREE" | "3PT" | "2PT" | "ALL";
-
 //  Main screen 
 
 export default function CreateSession() {
-  const router = useRouter();
   const { width } = useWindowDimensions();
   const isSmall = width < 360;
 
   const courtPreviewW = Math.min(width - (isSmall ? 32 : 40), 420);
   const courtPreviewH = Math.round(courtPreviewW * 1.08);
 
-  const [mode, setMode]                     = useState<SelectionMode>("FREE");
-  const [selected, setSelected]             = useState<Set<string>>(new Set());
-  const [defaultTarget, setDefaultTarget]   = useState(10);
-  const [showCourtModal, setShowCourtModal] = useState(false);
-  const [currentSpotIndex, setCurrentSpotIndex] = useState(0);
-  const [saving, setSaving]                 = useState(false);
-  const { isOnline } = useNetworkStatus();
-
-  const selectedCount = selected.size;
-  const currentSpot   = ALL_SPOTS[currentSpotIndex];
-  const canContinue   = selectedCount > 0 && !saving;
-
-  const selectedSpots = useMemo(
-    () => ALL_SPOTS.filter((s) => selected.has(s.id)),
-    [selected]
-  );
+  const {
+    applyMode,
+    canContinue,
+    createSessionAndGo,
+    currentSpot,
+    currentSpotIndex,
+    defaultTarget,
+    mode,
+    saving,
+    selected,
+    selectedCount,
+    selectedSpots,
+    setCurrentSpotIndex,
+    setDefaultTarget,
+    setShowCourtModal,
+    showCourtModal,
+    toggleSpot,
+  } = useCreateSessionController();
 
   // Entrance animations (staggered)
   const titleAnim   = useFadeSlide(0);
@@ -81,138 +72,6 @@ export default function CreateSession() {
   const targetAnim  = useFadeSlide(240);
   const footerAnim  = useFadeSlide(320);
 
-  //  Mode selection 
-  function applyMode(m: SelectionMode) {
-    setMode(m);
-    switch (m) {
-      case "3PT": setSelected(new Set(TRIPLE_SPOTS.map((s) => s.id))); break;
-      case "2PT": setSelected(new Set(DOBLE_SPOTS.map((s)  => s.id))); break;
-      case "ALL": setSelected(new Set(ALL_SPOTS.map((s)    => s.id))); break;
-      case "FREE": setSelected(new Set()); break;
-    }
-  }
-
-  function toggleSpot(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-    // If user manually edits a preset, transition to free mode
-    if (mode !== "FREE") setMode("FREE");
-  }
-
-  const reset = useCallback(() => {
-    setMode("FREE");
-    setSelected(new Set());
-    setDefaultTarget(10);
-    setShowCourtModal(false);
-    setCurrentSpotIndex(0);
-    setSaving(false);
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => { return () => reset(); }, [reset])
-  );
-
-  //  Create session 
-  async function createSessionAndGo() {
-    if (saving) return;
-    if (selectedCount === 0) {
-      Alert.alert("Falta info", "Elegí al menos una posición.");
-      return;
-    }
-    try {
-      setSaving(true);
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-      const { data: auth, error: authErr } = await supabase.auth.getUser();
-      if (authErr) throw authErr;
-      const userId = auth.user?.id;
-      if (!userId) { Alert.alert("Error", "No hay usuario logueado."); return; }
-
-      const modeLabel = mode === "3PT" ? "Triples" : mode === "2PT" ? "Dobles" : mode === "ALL" ? "Completo" : "Libre";
-      const title = `Sesión ${modeLabel}  ${new Date().toLocaleDateString()}`;
-
-      if (isOnline === false) {
-        // ─ Modo offline: generar UUID local y guardar en AsyncStorage ─
-        const sessionId = generateUUID();
-        const now = new Date().toISOString();
-        const sessionRow = {
-          id: sessionId,
-          user_id: userId,
-          kind: "FREE",
-          title,
-          default_target_attempts: defaultTarget,
-          status: "IN_PROGRESS",
-          started_at: now,
-          workout_id: null,
-        };
-        const spotRows = selectedSpots.map((spot, i) => ({
-          id: generateUUID(),
-          session_id: sessionId,
-          user_id: userId,
-          spot_key: spot.id,
-          shot_type: spot.shotType as "2PT" | "3PT",
-          target_attempts: defaultTarget,
-          attempts: defaultTarget,
-          makes: 0,
-          order_index: i,
-        }));
-        await saveLocalSession(sessionRow, spotRows);
-        await enqueueOp({ type: "CREATE_SESSION", session: sessionRow, spots: spotRows });
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setShowCourtModal(false);
-        router.push({ pathname: "/session/run", params: { sessionId } });
-        return;
-      }
-
-      const { data: sessionRow, error: sErr } = await supabase
-        .from("sessions")
-        .insert({
-          user_id: userId,
-          kind: "FREE",
-          title,
-          default_target_attempts: defaultTarget,
-          status: "IN_PROGRESS",
-          started_at: new Date().toISOString(),
-        })
-        .select("id")
-        .single();
-
-      if (sErr) throw sErr;
-      const sessionId = sessionRow?.id as string | undefined;
-      if (!sessionId) throw new Error("No se pudo crear la sesión (sin id).");
-
-      const rows = selectedSpots.map((spot, idx) => ({
-        session_id: sessionId,
-        user_id: userId,
-        spot_key: spot.id,
-        shot_type: spot.shotType,
-        target_attempts: defaultTarget,
-        attempts: defaultTarget,
-        makes: 0,
-        order_index: idx,
-      }));
-
-      const { error: ssErr } = await supabase.from("session_spots").insert(rows);
-      if (ssErr) {
-        await supabase.from("sessions").delete().eq("id", sessionId);
-        throw ssErr;
-      }
-
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setShowCourtModal(false);
-      router.push({ pathname: "/session/run", params: { sessionId } });
-    } catch (e: any) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Error", e?.message ?? "Algo salió mal creando la sesión.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
       <ScrollView

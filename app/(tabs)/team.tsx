@@ -1,5 +1,14 @@
 // app/(tabs)/team.tsx
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
+import {
+  getSharedTeamWorkouts,
+  getTeamMembers,
+  getUserTeam,
+  joinTeamByCode,
+  leaveTeam as leaveTeamMembership,
+  shareWorkoutWithTeam,
+  unshareWorkoutWithTeam,
+} from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -72,70 +81,30 @@ export default function TeamScreen() {
   const [leaving, setLeaving]     = useState(false);
 
   // DB error (tables may not exist yet)
-  const [dbError, setDbError]     = useState(false);
+  const dbError = false;
 
   // Entrance animation
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const loadData = useCallback(async () => {
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth.user?.id ?? null;
+      const uid = await getCurrentUserId();
       setUserId(uid);
       if (!uid) return;
 
-      const { data: membership, error } = await supabase
-        .from("team_members")
-        .select("id, team_id, user_id, role, joined_at, teams(id, name, invite_code)")
-        .eq("user_id", uid)
-        .maybeSingle();
-
-      if (error) {
-        // Table doesn't exist yet — show "coming soon" state
-        if (error.code === "42P01" || error.message?.includes("does not exist")) {
-          setDbError(true);
-        }
-        setTeam(null);
-        return;
-      }
-
-      setDbError(false);
-
-      if (!membership) {
+      const result = await getUserTeam(uid);
+      if (!result) {
         setTeam(null);
         setMyRole(null);
         setMembers([]);
         return;
       }
 
-      const t = (membership as any).teams as Team;
-      setTeam(t);
-      setMyRole((membership as any).role ?? "player");
+      setTeam(result.team);
+      setMyRole(result.memberRole);
 
-      // Load teammates
-      const { data: allMembers } = await supabase
-        .from("team_members")
-        .select("id, user_id, role, joined_at")
-        .eq("team_id", t.id)
-        .order("joined_at", { ascending: true });
-
-      // Fetch display names from profiles
-      const memberIds = (allMembers ?? []).map((m: any) => m.user_id);
-      let nameMap: Record<string, string | null> = {};
-      if (memberIds.length > 0) {
-        const { data: profileRows } = await supabase
-          .from("profiles")
-          .select("id, display_name")
-          .in("id", memberIds);
-        (profileRows ?? []).forEach((p: any) => { nameMap[p.id] = p.display_name; });
-      }
-
-      setMembers(
-        (allMembers ?? []).map((m: any) => ({
-          ...m,
-          display_name: nameMap[m.user_id] ?? null,
-        })) as MemberRow[]
-      );
+      const membersList = await getTeamMembers(result.team.id);
+      setMembers(membersList);
     } catch {
       setTeam(null);
     } finally {
@@ -165,21 +134,7 @@ export default function TeamScreen() {
       setJoining(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      const { data, error } = await supabase
-        .rpc("join_team_by_code", { invite_code: code });
-
-      if (error) throw error;
-
-      if (data?.error === "team_not_found") {
-        Alert.alert("Código inválido", "No encontramos ningún equipo con ese código. Verificá con tu entrenador.");
-        return;
-      }
-
-      if (data?.error === "already_member") {
-        Alert.alert("Ya sos parte", "Ya estás unido/a a este equipo.");
-        await loadData();
-        return;
-      }
+      await joinTeamByCode(userId, code);
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setCodeInput("");
@@ -200,24 +155,18 @@ export default function TeamScreen() {
       "¿Estás segura? Dejará de aparecer en las estadísticas del entrenador.",
       [
         { text: "Cancelar", style: "cancel" },
-        { text: "Salir", style: "destructive", onPress: leaveTeam },
+        { text: "Salir", style: "destructive", onPress: handleLeaveTeam },
       ]
     );
   }
 
-  async function leaveTeam() {
+  async function handleLeaveTeam() {
     if (!userId || !team) return;
     try {
       setLeaving(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      const { error } = await supabase
-        .from("team_members")
-        .delete()
-        .eq("team_id", team.id)
-        .eq("user_id", userId);
-
-      if (error) throw error;
+      await leaveTeamMembership(userId);
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTeam(null);
@@ -545,7 +494,7 @@ function MembersCard({ members, userId }: { members: MemberRow[]; userId: string
             Entrenador/a
           </Text>
           {coaches.map((m) => (
-            <MemberRow key={m.id} member={m} isMe={m.user_id === userId} />
+            <MemberItem key={m.id} member={m} isMe={m.user_id === userId} />
           ))}
         </View>
       )}
@@ -556,7 +505,7 @@ function MembersCard({ members, userId }: { members: MemberRow[]; userId: string
             Jugadores
           </Text>
           {players.map((m) => (
-            <MemberRow key={m.id} member={m} isMe={m.user_id === userId} />
+            <MemberItem key={m.id} member={m} isMe={m.user_id === userId} />
           ))}
         </View>
       )}
@@ -564,7 +513,7 @@ function MembersCard({ members, userId }: { members: MemberRow[]; userId: string
   );
 }
 
-function MemberRow({ member, isMe }: { member: MemberRow; isMe: boolean }) {
+function MemberItem({ member, isMe }: { member: MemberRow; isMe: boolean }) {
   const joinDate = member.joined_at
     ? new Date(member.joined_at).toLocaleDateString("es-AR", { day: "numeric", month: "short" })
     : null;
@@ -623,14 +572,8 @@ function SharedSection({ team, userId }: { team: Team; userId: string | null }) 
     if (!userId) return;
     try {
       setLoading(true);
-      // Load only workouts already shared with THIS team
-      const { data } = await supabase
-        .from("team_workouts")
-        .select("workout_id, workouts(id, title, status)")
-        .eq("team_id", team.id)
-        .eq("user_id", userId);
-      const rows = (data ?? []).map((r: any) => r.workouts).filter(Boolean);
-      setSharedWorkouts(rows as any[]);
+      const rows = await getSharedTeamWorkouts(team.id, userId);
+      setSharedWorkouts(rows);
     } catch {
       setSharedWorkouts([]);
     } finally {
@@ -734,12 +677,7 @@ function SharedWorkoutRow({
     try {
       setUnsharing(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      await supabase
-        .from("team_workouts")
-        .delete()
-        .eq("team_id", teamId)
-        .eq("workout_id", workout.id)
-        .eq("user_id", userId);
+      await unshareWorkoutWithTeam({ teamId, workoutId: workout.id, userId });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onUnshared();
     } catch {
@@ -810,12 +748,9 @@ function SharePickerModal({
     async function load() {
       if (!userId) return;
       try {
-        const { data } = await supabase
-          .from("workouts")
-          .select("id, title, status, shot_type, sessions_goal, created_at")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-        setWorkouts((data ?? []) as any[]);
+        const { getUserWorkouts } = await import("@/src/features/workout/services/workout.service");
+        const workoutsList = await getUserWorkouts(userId);
+        setWorkouts(workoutsList as any[]);
       } catch {
         setWorkouts([]);
       } finally {
@@ -830,15 +765,7 @@ function SharePickerModal({
     try {
       setSharing(w.id);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await supabase.from("team_workouts").upsert({
-        team_id: team.id,
-        workout_id: w.id,
-        user_id: userId,
-        workout_title: w.title,
-        workout_status: w.status,
-        shot_type: w.shot_type,
-        sessions_goal: w.sessions_goal,
-      });
+      await shareWorkoutWithTeam({ teamId: team.id, userId, workout: w });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Compartida ✓", `"${w.title}" ya es visible para tu entrenador/a.`);
       onShared();

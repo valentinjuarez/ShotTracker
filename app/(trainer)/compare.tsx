@@ -1,5 +1,6 @@
 // app/(trainer)/compare.tsx — Head-to-head player comparison
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
+import { getCoachPlayersDetailed } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useState } from "react";
@@ -77,8 +78,8 @@ function pctColor(p: number | null) {
 // ─── Main screen ─────────────────────────────────────────────────────────────
 
 export default function CompareScreen() {
-  const [teamId, setTeamId]     = useState<string | null>(null);
   const [roster, setRoster]     = useState<PlayerStub[]>([]);
+  const [detailsById, setDetailsById] = useState<Record<string, PlayerSummary>>({});
   const [pickSlot, setPickSlot] = useState<"A" | "B" | null>(null);
 
   const [selA, setSelA] = useState<PlayerStub | null>(null);
@@ -92,32 +93,35 @@ export default function CompareScreen() {
   // Load team roster once
   useEffect(() => {
     (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth.user?.id;
+      const uid = await getCurrentUserId();
       if (!uid) return;
+      const detailed = await getCoachPlayersDetailed(uid);
+      const map: Record<string, PlayerSummary> = {};
 
-      const { data: mem } = await supabase
-        .from("team_members").select("team_id")
-        .eq("user_id", uid).eq("role", "coach").maybeSingle();
-      if (!mem) { setLoadingRoster(false); return; }
+      detailed.forEach((p) => {
+        const triples = p.spotBreakdown.filter((s) => s.shot_type === "3PT");
+        const doubles = p.spotBreakdown.filter((s) => s.shot_type !== "3PT");
 
-      const tid = (mem as any).team_id as string;
-      setTeamId(tid);
+        map[p.user_id] = {
+          user_id: p.user_id,
+          display_name: p.display_name ?? `#${p.user_id.slice(0, 6)}`,
+          sessions: p.sessions,
+          attempts: p.attempts,
+          makes: p.makes,
+          pct: p.pct,
+          tripleAtt: triples.reduce((a, s) => a + s.attempts, 0),
+          tripleMk: triples.reduce((a, s) => a + s.makes, 0),
+          doubleAtt: doubles.reduce((a, s) => a + s.attempts, 0),
+          doubleMk: doubles.reduce((a, s) => a + s.makes, 0),
+          spotBreakdown: p.spotBreakdown,
+        };
+      });
 
-      const { data: players } = await supabase
-        .from("team_members").select("user_id")
-        .eq("team_id", tid).eq("role", "player");
-
-      const ids = (players ?? []).map((p: any) => p.user_id as string);
-      if (!ids.length) { setLoadingRoster(false); return; }
-
-      const { data: profiles } = await supabase
-        .from("profiles").select("id, display_name").in("id", ids);
-
+      setDetailsById(map);
       setRoster(
-        (profiles ?? []).map((p: any) => ({
-          user_id: p.id,
-          display_name: p.display_name ?? `#${p.id.slice(0, 6)}`,
+        detailed.map((p) => ({
+          user_id: p.user_id,
+          display_name: p.display_name ?? `#${p.user_id.slice(0, 6)}`,
         }))
       );
       setLoadingRoster(false);
@@ -129,66 +133,11 @@ export default function CompareScreen() {
     const dataSetter = slot === "A" ? setDataA : setDataB;
     setter(true);
     try {
-      // Collect all session IDs: free (user_id) + workout (workout_id in user's workouts)
-      const { data: playerWorkouts } = await supabase
-        .from("workouts").select("id").eq("user_id", stub.user_id);
-      const wkIds = (playerWorkouts ?? []).map((w: any) => w.id as string);
-
-      const [{ data: freeSess }, { data: wkSess }] = await Promise.all([
-        supabase.from("sessions").select("id, started_at").eq("user_id", stub.user_id),
-        wkIds.length > 0
-          ? supabase.from("sessions").select("id, started_at").in("workout_id", wkIds)
-          : Promise.resolve({ data: [] as any[] }),
-      ]);
-      const seenIds  = new Set((freeSess ?? []).map((s: any) => s.id as string));
-      const combined = [...(freeSess ?? [])];
-      (wkSess ?? []).forEach((s: any) => { if (!seenIds.has(s.id)) combined.push(s); });
-
-      const sessionIds = combined.map((s: any) => s.id as string);
-
-      let spots: any[] = [];
-      if (sessionIds.length > 0) {
-        const { data: sp } = await supabase
-          .from("session_spots").select("spot_key, shot_type, attempts, makes")
-          .in("session_id", sessionIds);
-        spots = sp ?? [];
-      }
-
-      const spotMap: Record<string, { shot_type: string; att: number; mk: number }> = {};
-      spots.forEach((s: any) => {
-        if (!spotMap[s.spot_key]) spotMap[s.spot_key] = { shot_type: s.shot_type, att: 0, mk: 0 };
-        spotMap[s.spot_key].att += s.attempts ?? 0;
-        spotMap[s.spot_key].mk  += s.makes    ?? 0;
-      });
-
-      const breakdown: SpotRow[] = Object.entries(spotMap).map(([key, v]) => ({
-        spot_key: key, shot_type: v.shot_type,
-        attempts: v.att, makes: v.mk,
-        pct: v.att > 0 ? v.mk / v.att : 0,
-      })).sort((a, b) => b.pct - a.pct);
-
-      const att = breakdown.reduce((a, s) => a + s.attempts, 0);
-      const mk  = breakdown.reduce((a, s) => a + s.makes, 0);
-
-      const triples = breakdown.filter((s) => s.shot_type === "3PT");
-      const doubles = breakdown.filter((s) => s.shot_type !== "3PT");
-
-      dataSetter({
-        user_id: stub.user_id,
-        display_name: stub.display_name,
-        sessions: combined.length,
-        attempts: att, makes: mk,
-        pct: att > 0 ? mk / att : null,
-        tripleAtt: triples.reduce((a, s) => a + s.attempts, 0),
-        tripleMk:  triples.reduce((a, s) => a + s.makes, 0),
-        doubleAtt: doubles.reduce((a, s) => a + s.attempts, 0),
-        doubleMk:  doubles.reduce((a, s) => a + s.makes, 0),
-        spotBreakdown: breakdown,
-      });
+      dataSetter(detailsById[stub.user_id] ?? null);
     } finally {
       setter(false);
     }
-  }, []);
+  }, [detailsById]);
 
   function pickPlayer(stub: PlayerStub) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
