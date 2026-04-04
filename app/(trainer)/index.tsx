@@ -3,18 +3,19 @@ import { useCoachDashboardController } from "@/src/features/team/hooks/useCoachD
 import type { PlayerStat } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Share,
-  Text,
-  View,
+    ActivityIndicator,
+    Animated,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    Text,
+    View,
 } from "react-native";
 
 function greeting() {
@@ -54,6 +55,7 @@ const card = {
 export default function CoachDashboard() {
   const router = useRouter();
   const {
+    avatarUrl,
     displayName,
     initials,
     isNameLoading,
@@ -98,8 +100,15 @@ export default function CoachDashboard() {
             borderWidth: 1.5, borderColor: "rgba(99,179,237,0.40)",
             alignItems: "center", justifyContent: "center",
             shadowColor: "#63B3ED", shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 2 },
+            overflow: "hidden",
           }}>
-            {initials ? (
+            {avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="cover"
+              />
+            ) : initials ? (
               <Text style={{ color: "rgba(99,179,237,1)", fontWeight: "900", fontSize: 17 }}>
                 {initials}
               </Text>
@@ -286,7 +295,7 @@ function NoTeamState({ onCreateTeam }: { onCreateTeam: () => void }) {
   );
 }
 
-function TeamBanner({ team }: { team: { id: string; name: string; invite_code: string } }) {
+function TeamBanner({ team }: { team: { id: string; name: string; invite_code: string; avatar_url?: string | null } }) {
   const [copied, setCopied] = React.useState(false);
 
   async function onCopy() {
@@ -318,7 +327,15 @@ function TeamBanner({ team }: { team: { id: string; name: string; invite_code: s
             borderWidth: 1.5, borderColor: "rgba(99,179,237,0.35)",
             alignItems: "center", justifyContent: "center",
           }}>
-            <Ionicons name="shield-half-outline" size={24} color="rgba(99,179,237,0.90)" />
+            {team.avatar_url ? (
+              <Image
+                source={{ uri: team.avatar_url }}
+                style={{ width: 46, height: 46, borderRadius: 14 }}
+                contentFit="cover"
+              />
+            ) : (
+              <Ionicons name="shield-half-outline" size={24} color="rgba(99,179,237,0.90)" />
+            )}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 11, fontWeight: "600", letterSpacing: 0.4 }}>
@@ -436,7 +453,15 @@ function PlayerRankRow({ player, rank, onPress }: { player: PlayerStat; rank: nu
         backgroundColor: "rgba(255,255,255,0.07)",
         alignItems: "center", justifyContent: "center",
       }}>
-        <Ionicons name="person-outline" size={16} color="rgba(255,255,255,0.45)" />
+        {player.avatar_url ? (
+          <Image
+            source={{ uri: player.avatar_url }}
+            style={{ width: 34, height: 34, borderRadius: 17 }}
+            contentFit="cover"
+          />
+        ) : (
+          <Ionicons name="person-outline" size={16} color="rgba(255,255,255,0.45)" />
+        )}
       </View>
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={{ color: "white", fontWeight: "800", fontSize: 14 }}>

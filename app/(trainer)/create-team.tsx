@@ -1,8 +1,10 @@
 // app/(trainer)/create-team.tsx — Create team screen
 import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
-import { createTeam } from "@/src/features/team/services/team.service";
+import { createTeam, updateTeamAvatar } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
 import {
@@ -25,9 +27,11 @@ function generateCode() {
 export default function CreateTeam() {
   const router = useRouter();
   const [teamName, setTeamName]   = useState("");
+  const [teamAvatarUri, setTeamAvatarUri] = useState<string | null>(null);
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState<string | null>(null);
-  const [created, setCreated]     = useState<{ name: string; code: string } | null>(null);
+  const [avatarInfo, setAvatarInfo] = useState<string | null>(null);
+  const [created, setCreated]     = useState<{ name: string; code: string; avatarUrl?: string | null } | null>(null);
   const [copied, setCopied]       = useState(false);
   const [focused, setFocused]     = useState(false);
 
@@ -36,6 +40,30 @@ export default function CreateTeam() {
 
   const press = (v: number) =>
     Animated.spring(scaleAnim, { toValue: v, useNativeDriver: true, speed: 50, bounciness: 2 }).start();
+
+  async function onPickTeamAvatar() {
+    try {
+      setError(null);
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setError("Necesitamos permiso a fotos para cargar el avatar del equipo.");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      setTeamAvatarUri(result.assets[0].uri);
+      setAvatarInfo("Foto del equipo seleccionada.");
+    } catch {
+      setError("No se pudo abrir la galería. Intentá de nuevo.");
+    }
+  }
 
   async function onCreate() {
     const name = teamName.trim();
@@ -51,7 +79,17 @@ export default function CreateTeam() {
       const inviteCode = generateCode();
       const team = await createTeam(userId, name, inviteCode);
 
-      setCreated({ name: team.name, code: team.invite_code });
+      let avatarUrl: string | null = null;
+      if (teamAvatarUri) {
+        try {
+          avatarUrl = await updateTeamAvatar(team.id, userId, teamAvatarUri);
+          setAvatarInfo("Avatar del equipo guardado.");
+        } catch {
+          setError("El equipo se creó, pero no se pudo subir su foto. Podés reintentar desde Perfil.");
+        }
+      }
+
+      setCreated({ name: team.name, code: team.invite_code, avatarUrl });
       Animated.spring(successAnim, {
         toValue: 1, useNativeDriver: true, damping: 12, stiffness: 90,
       }).start();
@@ -129,6 +167,56 @@ export default function CreateTeam() {
             <>
               {/* Team name input */}
               <View style={{ gap: 8, marginBottom: 24 }}>
+                <Text style={{
+                  color: "rgba(255,255,255,0.45)", fontSize: 11,
+                  fontWeight: "700", letterSpacing: 0.9, textTransform: "uppercase",
+                }}>
+                  Avatar del equipo (opcional)
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                  <View style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 28,
+                    overflow: "hidden",
+                    backgroundColor: "rgba(99,179,237,0.12)",
+                    borderWidth: 1,
+                    borderColor: "rgba(99,179,237,0.30)",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}>
+                    {teamAvatarUri ? (
+                      <Image source={{ uri: teamAvatarUri }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+                    ) : (
+                      <Ionicons name="shield-half-outline" size={24} color="rgba(99,179,237,0.90)" />
+                    )}
+                  </View>
+                  <Pressable
+                    onPress={onPickTeamAvatar}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      paddingVertical: 8,
+                      paddingHorizontal: 12,
+                      borderRadius: 10,
+                      backgroundColor: "rgba(99,179,237,0.14)",
+                      borderWidth: 1,
+                      borderColor: "rgba(99,179,237,0.30)",
+                    }}
+                  >
+                    <Ionicons name="camera-outline" size={14} color="rgba(99,179,237,0.95)" />
+                    <Text style={{ color: "rgba(99,179,237,0.95)", fontSize: 12, fontWeight: "800" }}>
+                      {teamAvatarUri ? "Cambiar" : "Elegir foto"}
+                    </Text>
+                  </Pressable>
+                </View>
+                {avatarInfo ? (
+                  <Text style={{ color: "rgba(34,197,94,0.85)", fontSize: 12 }}>
+                    {avatarInfo}
+                  </Text>
+                ) : null}
+
                 <Text style={{
                   color: "rgba(255,255,255,0.45)", fontSize: 11,
                   fontWeight: "700", letterSpacing: 0.9, textTransform: "uppercase",
@@ -213,7 +301,21 @@ export default function CreateTeam() {
                 borderWidth: 1, borderColor: "rgba(34,197,94,0.22)",
                 alignItems: "center",
               }}>
-                <Ionicons name="checkmark-circle" size={36} color="rgba(34,197,94,0.90)" style={{ marginBottom: 4 }} />
+                {created.avatarUrl ? (
+                  <View style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 32,
+                    overflow: "hidden",
+                    marginBottom: 6,
+                    borderWidth: 1,
+                    borderColor: "rgba(34,197,94,0.35)",
+                  }}>
+                    <Image source={{ uri: created.avatarUrl }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+                  </View>
+                ) : (
+                  <Ionicons name="checkmark-circle" size={36} color="rgba(34,197,94,0.90)" style={{ marginBottom: 4 }} />
+                )}
                 <Text style={{ color: "white", fontWeight: "900", fontSize: 18, letterSpacing: -0.3 }}>
                   ¡Equipo creado!
                 </Text>

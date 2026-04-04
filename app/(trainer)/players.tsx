@@ -4,18 +4,19 @@ import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import { getCoachPlayersDetailed } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Modal,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 
@@ -59,6 +60,7 @@ const SPOT_LABEL: Record<string, string> = {
 type PlayerDetail = {
   user_id: string;
   display_name: string | null;
+  avatar_url?: string | null;
   sessions: number;
   attempts: number;
   makes: number;
@@ -272,9 +274,17 @@ function PlayerRow({ player, rank, onPress }: { player: PlayerDetail; rank: numb
         borderWidth: 1.5, borderColor: "rgba(245,158,11,0.22)",
         alignItems: "center", justifyContent: "center",
       }}>
-        <Text style={{ color: "rgba(245,158,11,0.85)", fontWeight: "900", fontSize: 15 }}>
-          {(player.display_name ?? "?")[0].toUpperCase()}
-        </Text>
+        {player.avatar_url ? (
+          <Image
+            source={{ uri: player.avatar_url }}
+            style={{ width: 36, height: 36, borderRadius: 18 }}
+            contentFit="cover"
+          />
+        ) : (
+          <Text style={{ color: "rgba(245,158,11,0.85)", fontWeight: "900", fontSize: 15 }}>
+            {(player.display_name ?? "?")[0].toUpperCase()}
+          </Text>
+        )}
       </View>
 
       {/* Name + stats */}
@@ -346,9 +356,17 @@ function PlayerDetailModal({ player, onClose }: { player: PlayerDetail; onClose:
                 borderWidth: 1.5, borderColor: "rgba(245,158,11,0.30)",
                 alignItems: "center", justifyContent: "center",
               }}>
-                <Text style={{ color: "rgba(245,158,11,0.90)", fontWeight: "900", fontSize: 22 }}>
-                  {(player.display_name ?? "?")[0].toUpperCase()}
-                </Text>
+                {player.avatar_url ? (
+                  <Image
+                    source={{ uri: player.avatar_url }}
+                    style={{ width: 52, height: 52, borderRadius: 26 }}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <Text style={{ color: "rgba(245,158,11,0.90)", fontWeight: "900", fontSize: 22 }}>
+                    {(player.display_name ?? "?")[0].toUpperCase()}
+                  </Text>
+                )}
               </View>
               <View style={{ flex: 1, gap: 4, paddingTop: 4 }}>
                 <Text style={{ color: "white", fontWeight: "900", fontSize: 20, letterSpacing: -0.4 }}>

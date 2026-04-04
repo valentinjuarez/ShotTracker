@@ -8,6 +8,7 @@ import {
     getCurrentUserMetadata,
     signOut,
 } from "@/src/features/auth/services/auth.service";
+import { getCurrentUserProfile } from "@/src/features/profile/services/profile.service";
 import {
     getSessionAttemptsBySession,
     getSessionHistory,
@@ -33,6 +34,7 @@ export function usePlayerHomeController() {
   const router = useRouter();
 
   const [name, setName] = useState<string>("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
   const [weeklyAttempts, setWeeklyAttempts] = useState<number | null>(null);
   const [weeklyPct, setWeeklyPct] = useState<number | null>(null);
@@ -60,6 +62,9 @@ export function usePlayerHomeController() {
         (meta.username as string | undefined) ??
         "";
       setName(displayName);
+
+      const profile = await getCurrentUserProfile();
+      setAvatarUrl(profile?.avatar_url ?? null);
 
       if (!userId) {
         setLoadingStats(false);
@@ -178,6 +183,7 @@ export function usePlayerHomeController() {
 
   return {
     initials,
+    avatarUrl,
     inProgressWorkout,
     lastDate,
     lastLabel,

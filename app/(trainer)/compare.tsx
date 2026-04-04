@@ -3,6 +3,7 @@ import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import { getCoachPlayersDetailed } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -19,6 +20,7 @@ import {
 type PlayerSummary = {
   user_id: string;
   display_name: string;
+  avatar_url?: string | null;
   sessions: number;
   attempts: number;
   makes: number;
@@ -38,7 +40,7 @@ type SpotRow = {
   pct: number;
 };
 
-type PlayerStub = { user_id: string; display_name: string };
+type PlayerStub = { user_id: string; display_name: string; avatar_url?: string | null };
 
 // ─── Color constants ──────────────────────────────────────────────────────────
 
@@ -105,6 +107,7 @@ export default function CompareScreen() {
         map[p.user_id] = {
           user_id: p.user_id,
           display_name: p.display_name ?? `#${p.user_id.slice(0, 6)}`,
+          avatar_url: p.avatar_url ?? null,
           sessions: p.sessions,
           attempts: p.attempts,
           makes: p.makes,
@@ -122,6 +125,7 @@ export default function CompareScreen() {
         detailed.map((p) => ({
           user_id: p.user_id,
           display_name: p.display_name ?? `#${p.user_id.slice(0, 6)}`,
+          avatar_url: p.avatar_url ?? null,
         }))
       );
       setLoadingRoster(false);
@@ -297,48 +301,113 @@ export default function CompareScreen() {
               Elegir jugadora {pickSlot}
             </Text>
 
+            <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
+              <Pressable
+                onPress={() => setPickSlot(null)}
+                style={{
+                  alignSelf: "flex-start",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  paddingVertical: 7,
+                  paddingHorizontal: 10,
+                  borderRadius: 10,
+                  backgroundColor: "rgba(255,255,255,0.06)",
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.12)",
+                }}
+              >
+                <Ionicons name="chevron-back" size={14} color="rgba(255,255,255,0.70)" />
+                <Text style={{ color: "rgba(255,255,255,0.70)", fontWeight: "700", fontSize: 12 }}>
+                  Volver
+                </Text>
+              </Pressable>
+            </View>
+
             {loadingRoster ? (
               <ActivityIndicator color="#F59E0B" style={{ marginVertical: 24 }} />
             ) : (
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
-                {roster
-                  .filter((r) => {
-                    // Don't allow picking the same player for both slots
-                    if (pickSlot === "A") return r.user_id !== selB?.user_id;
-                    return r.user_id !== selA?.user_id;
-                  })
-                  .map((r) => (
-                    <Pressable
-                      key={r.user_id}
-                      onPress={() => pickPlayer(r)}
-                      style={({ pressed }) => ({
-                        flexDirection: "row", alignItems: "center", gap: 12,
-                        padding: 14, borderRadius: 14,
-                        backgroundColor: pressed ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.04)",
-                        borderWidth: 1, borderColor: "rgba(255,255,255,0.09)",
-                      })}
-                    >
-                      <View style={{
-                        width: 38, height: 38, borderRadius: 19,
-                        backgroundColor: pickSlot === "A" ? "rgba(99,179,237,0.15)" : "rgba(245,158,11,0.15)",
-                        borderWidth: 1.5,
-                        borderColor: pickSlot === "A" ? "rgba(99,179,237,0.35)" : "rgba(245,158,11,0.35)",
-                        alignItems: "center", justifyContent: "center",
-                      }}>
-                        <Text style={{
-                          color: pickSlot === "A" ? COL_A : COL_B,
-                          fontWeight: "900", fontSize: 15,
-                        }}>
-                          {r.display_name.charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                      <Text style={{ flex: 1, color: "white", fontWeight: "700", fontSize: 15 }}>
-                        {r.display_name}
+              (() => {
+                const candidates = roster.filter((r) => {
+                  // Don't allow picking the same player for both slots
+                  if (pickSlot === "A") return r.user_id !== selB?.user_id;
+                  return r.user_id !== selA?.user_id;
+                });
+
+                if (candidates.length === 0) {
+                  return (
+                    <View style={{ paddingHorizontal: 20, paddingVertical: 14, gap: 12, alignItems: "center" }}>
+                      <Text style={{ color: "rgba(255,255,255,0.45)", textAlign: "center", fontSize: 13 }}>
+                        No hay más jugadoras disponibles para elegir.
                       </Text>
-                      <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
-                    </Pressable>
-                  ))}
-              </ScrollView>
+                      <Pressable
+                        onPress={() => setPickSlot(null)}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          paddingVertical: 9,
+                          paddingHorizontal: 14,
+                          borderRadius: 10,
+                          backgroundColor: "rgba(99,179,237,0.12)",
+                          borderWidth: 1,
+                          borderColor: "rgba(99,179,237,0.30)",
+                        }}
+                      >
+                        <Ionicons name="arrow-back-outline" size={14} color="rgba(99,179,237,0.95)" />
+                        <Text style={{ color: "rgba(99,179,237,0.95)", fontWeight: "800", fontSize: 12 }}>
+                          Volver a comparativa
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                }
+
+                return (
+                  <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
+                    {candidates.map((r) => (
+                      <Pressable
+                        key={r.user_id}
+                        onPress={() => pickPlayer(r)}
+                        style={({ pressed }) => ({
+                          flexDirection: "row", alignItems: "center", gap: 12,
+                          padding: 14, borderRadius: 14,
+                          backgroundColor: pressed ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.04)",
+                          borderWidth: 1, borderColor: "rgba(255,255,255,0.09)",
+                        })}
+                      >
+                        <View style={{
+                          width: 38, height: 38, borderRadius: 19,
+                          backgroundColor: pickSlot === "A" ? "rgba(99,179,237,0.15)" : "rgba(245,158,11,0.15)",
+                          borderWidth: 1.5,
+                          borderColor: pickSlot === "A" ? "rgba(99,179,237,0.35)" : "rgba(245,158,11,0.35)",
+                          alignItems: "center", justifyContent: "center",
+                          overflow: "hidden",
+                        }}>
+                          {r.avatar_url ? (
+                            <Image
+                              source={{ uri: r.avatar_url }}
+                              style={{ width: "100%", height: "100%" }}
+                              contentFit="cover"
+                            />
+                          ) : (
+                            <Text style={{
+                              color: pickSlot === "A" ? COL_A : COL_B,
+                              fontWeight: "900", fontSize: 15,
+                            }}>
+                              {r.display_name.charAt(0).toUpperCase()}
+                            </Text>
+                          )}
+                        </View>
+                        <Text style={{ flex: 1, color: "white", fontWeight: "700", fontSize: 15 }}>
+                          {r.display_name}
+                        </Text>
+                        <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                );
+              })()
             )}
           </View>
         </View>
@@ -377,10 +446,19 @@ function PlayerPicker({ slot, color, player, loading, onPress }: {
             backgroundColor: `${color}20`,
             borderWidth: 2, borderColor: `${color}55`,
             alignItems: "center", justifyContent: "center",
+            overflow: "hidden",
           }}>
-            <Text style={{ color, fontWeight: "900", fontSize: 18 }}>
-              {player.display_name.charAt(0).toUpperCase()}
-            </Text>
+            {player.avatar_url ? (
+              <Image
+                source={{ uri: player.avatar_url }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="cover"
+              />
+            ) : (
+              <Text style={{ color, fontWeight: "900", fontSize: 18 }}>
+                {player.display_name.charAt(0).toUpperCase()}
+              </Text>
+            )}
           </View>
           <Text style={{ color: "white", fontWeight: "800", fontSize: 13, textAlign: "center" }} numberOfLines={1}>
             {player.display_name}

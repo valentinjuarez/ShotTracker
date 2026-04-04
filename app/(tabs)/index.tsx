@@ -2,6 +2,7 @@
 import { usePlayerHomeController } from "@/src/features/home/hooks/usePlayerHomeController";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import { Link, useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
@@ -47,6 +48,7 @@ export default function Home() {
   const isSmall = width < 360;
 
   const {
+    avatarUrl,
     initials,
     inProgressWorkout,
     lastDate,
@@ -98,10 +100,19 @@ export default function Home() {
             backgroundColor: "rgba(245,158,11,0.15)",
             borderWidth: 1.5, borderColor: "rgba(245,158,11,0.35)",
             alignItems: "center", justifyContent: "center",
+            overflow: "hidden",
           }}>
-            <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 16 }}>
-              {initials || "🏀"}
-            </Text>
+            {avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="cover"
+              />
+            ) : (
+              <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 16 }}>
+                {initials || "🏀"}
+              </Text>
+            )}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 12, letterSpacing: 0.2 }}>

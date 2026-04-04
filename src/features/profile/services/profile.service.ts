@@ -1,3 +1,4 @@
+import { deleteAvatarAtPath, uploadAvatarAtPath } from "@/src/features/media/services/avatar.service";
 import { supabase } from "@/src/lib/supabase";
 
 function throwIfError(error: { message?: string } | null, context: string) {
@@ -12,6 +13,7 @@ export type Profile = {
   id: string;
   display_name: string | null;
   role: UserRole;
+  avatar_url: string | null;
 };
 
 function resolveMetaRole(userMetadata: Record<string, unknown> | undefined): UserRole {
@@ -29,7 +31,7 @@ export async function getCurrentUserProfile(): Promise<Profile | null> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, display_name, role")
+    .select("id, display_name, role, avatar_url")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -42,7 +44,7 @@ export async function getCurrentUserProfile(): Promise<Profile | null> {
           (meta.display_name as string | undefined) ?? (meta.full_name as string | undefined) ?? null,
         role: metaRole,
       })
-      .select("id, display_name, role")
+      .select("id, display_name, role, avatar_url")
       .single();
 
     if (insertError) {
@@ -52,6 +54,7 @@ export async function getCurrentUserProfile(): Promise<Profile | null> {
         display_name:
           (meta.display_name as string | undefined) ?? (meta.full_name as string | undefined) ?? null,
         role: metaRole,
+        avatar_url: null,
       };
     }
 
@@ -64,6 +67,7 @@ export async function getCurrentUserProfile(): Promise<Profile | null> {
             (meta.full_name as string | undefined) ??
             null,
           role: (created.role as UserRole) ?? metaRole,
+          avatar_url: created.avatar_url ?? null,
         }
       : null;
   }
@@ -73,7 +77,21 @@ export async function getCurrentUserProfile(): Promise<Profile | null> {
     display_name:
       data.display_name ?? (meta.display_name as string | undefined) ?? (meta.full_name as string | undefined) ?? null,
     role: (data.role as UserRole) ?? metaRole,
+    avatar_url: data.avatar_url ?? null,
   };
+}
+
+export async function updateUserAvatar(userId: string, fileUri: string): Promise<string> {
+  const path = `profiles/${userId}`;
+  const publicUrl = await uploadAvatarAtPath(path, fileUri);
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ avatar_url: publicUrl })
+    .eq("id", userId);
+
+  throwIfError(error, "No se pudo guardar avatar de perfil");
+  return publicUrl;
 }
 
 export type UserStats = {
@@ -204,4 +222,7 @@ export async function deleteUserAccount(userId: string): Promise<void> {
       .eq("id", userId);
     throwIfError(error, "No se pudo borrar profile del usuario");
   }
+
+  // Best-effort cleanup for avatar file.
+  await deleteAvatarAtPath(`profiles/${userId}`).catch(() => {});
 }

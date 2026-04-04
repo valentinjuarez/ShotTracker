@@ -1,9 +1,11 @@
+import { deleteAvatarAtPath, uploadAvatarAtPath } from "@/src/features/media/services/avatar.service";
 import { supabase } from "@/src/lib/supabase";
 
 export type Team = {
   id: string;
   name: string;
   invite_code: string;
+  avatar_url?: string | null;
 };
 
 export type MemberRow = {
@@ -12,11 +14,13 @@ export type MemberRow = {
   role: "player" | "coach";
   joined_at: string;
   display_name: string | null;
+  avatar_url?: string | null;
 };
 
 export type PlayerStat = {
   user_id: string;
   display_name: string | null;
+  avatar_url?: string | null;
   sessions: number;
   attempts: number;
   makes: number;
@@ -47,6 +51,7 @@ export type CoachSharedWorkoutEntry = {
   sharedAt: string | null;
   playerId: string;
   playerName: string;
+  playerAvatarUrl?: string | null;
 };
 
 export type SpotBreakdown = {
@@ -60,6 +65,7 @@ export type SpotBreakdown = {
 export type CoachPlayerDetail = {
   user_id: string;
   display_name: string | null;
+  avatar_url?: string | null;
   sessions: number;
   attempts: number;
   makes: number;
@@ -71,7 +77,7 @@ export type CoachPlayerDetail = {
 export async function getUserTeam(userId: string): Promise<{ team: Team; memberRole: "player" | "coach" } | null> {
   const { data: membership, error } = await supabase
     .from("team_members")
-    .select("id, team_id, user_id, role, joined_at, teams(id, name, invite_code)")
+    .select("id, team_id, user_id, role, joined_at, teams(id, name, invite_code, avatar_url)")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -101,34 +107,97 @@ export async function getTeamMembers(teamId: string): Promise<MemberRow[]> {
   if (error) throw error;
 
   const memberIds = (allMembers ?? []).map((m: any) => m.user_id);
-  let nameMap: Record<string, string | null> = {};
+  let profileMap: Record<string, { display_name: string | null; avatar_url: string | null }> = {};
 
   if (memberIds.length > 0) {
     const { data: profileRows } = await supabase
       .from("profiles")
-      .select("id, display_name")
+      .select("id, display_name, avatar_url")
       .in("id", memberIds);
 
     (profileRows ?? []).forEach((p: any) => {
-      nameMap[p.id] = p.display_name;
+      profileMap[p.id] = {
+        display_name: p.display_name ?? null,
+        avatar_url: p.avatar_url ?? null,
+      };
     });
   }
 
   return (allMembers ?? []).map((m: any) => ({
     ...m,
-    display_name: nameMap[m.user_id] ?? null,
+    display_name: profileMap[m.user_id]?.display_name ?? null,
+    avatar_url: profileMap[m.user_id]?.avatar_url ?? null,
   })) as MemberRow[];
 }
 
 export async function joinTeamByCode(userId: string, inviteCode: string): Promise<void> {
+  const normalizedCode = inviteCode.trim().toUpperCase();
+
+  if (!normalizedCode) {
+    throw new Error("Código de invitación inválido");
+  }
+
+  // Prefer RPC if available; it can bypass restrictive RLS safely.
+  const { error: rpcJoinError } = await supabase.rpc("join_team_by_code", {
+    p_invite_code: normalizedCode,
+  });
+
+  if (!rpcJoinError) {
+    return;
+  }
+
+  // Function missing in DB: fallback to table-based flow.
+  if (rpcJoinError.code !== "42883") {
+    throw new Error(rpcJoinError.message ?? "No se pudo validar el código de invitación.");
+  }
+
   const { data: team, error: teamError } = await supabase
     .from("teams")
     .select("id")
-    .eq("invite_code", inviteCode)
+    .eq("invite_code", normalizedCode)
     .maybeSingle();
 
-  if (teamError) throw teamError;
+  if (teamError) {
+    throw new Error(teamError.message ?? "No se pudo validar el código de invitación.");
+  }
   if (!team) throw new Error("Código de invitación inválido");
+
+  const { data: existingMembership, error: existingError } = await supabase
+    .from("team_members")
+    .select("id, team_id, role")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message ?? "No se pudo verificar tu equipo actual.");
+  }
+
+  if (existingMembership) {
+    const currentTeamId = (existingMembership as any).team_id as string;
+    const currentRole = (existingMembership as any).role as "player" | "coach";
+
+    if (currentTeamId === team.id) {
+      return;
+    }
+
+    if (currentRole === "coach") {
+      throw new Error("No podés unirte como jugador/a porque ya sos entrenador/a de un equipo.");
+    }
+
+    const { error: updateError } = await supabase
+      .from("team_members")
+      .update({ team_id: team.id, role: "player" })
+      .eq("id", (existingMembership as any).id);
+
+    if (updateError) {
+      if (updateError.code === "42501") {
+        throw new Error("No tenés permisos para cambiar de equipo. Revisá las políticas RLS de team_members.");
+      }
+      throw new Error(updateError.message ?? "No se pudo actualizar tu equipo.");
+    }
+
+    return;
+  }
 
   const { error } = await supabase.from("team_members").insert({
     user_id: userId,
@@ -136,7 +205,15 @@ export async function joinTeamByCode(userId: string, inviteCode: string): Promis
     role: "player",
   });
 
-  if (error) throw error;
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error("Ya formás parte de un equipo.");
+    }
+    if (error.code === "42501") {
+      throw new Error("No tenés permisos para unirte al equipo. Revisá las políticas RLS de team_members.");
+    }
+    throw new Error(error.message ?? "No se pudo unir al equipo.");
+  }
 }
 
 export async function leaveTeam(userId: string): Promise<void> {
@@ -173,20 +250,108 @@ export async function createTeam(userId: string, teamName: string, inviteCode: s
     id: (team as any).id ?? "",
     name: (team as any).name ?? teamName,
     invite_code: (team as any).invite_code ?? inviteCode,
+    avatar_url: (team as any).avatar_url ?? null,
   };
 }
 
 export async function deleteTeam(teamId: string): Promise<void> {
-  await supabase.from("team_members").delete().eq("team_id", teamId);
-  const { error } = await supabase.from("teams").delete().eq("id", teamId);
-  if (error) throw error;
+  await deleteAvatarAtPath(`teams/${teamId}`).catch(() => {});
+
+  // Prefer RPC first to keep authorization + cascading deletes consistent under RLS.
+  const { error: rpcDeleteError } = await supabase.rpc("delete_team_for_coach", {
+    p_team_id: teamId,
+  });
+
+  if (!rpcDeleteError) {
+    return;
+  }
+
+  // Function missing in DB: fallback to table-based flow.
+  if (rpcDeleteError.code !== "42883") {
+    throw rpcDeleteError;
+  }
+
+  const { error: teamWorkoutsError } = await supabase
+    .from("team_workouts")
+    .delete()
+    .eq("team_id", teamId);
+  if (teamWorkoutsError) throw teamWorkoutsError;
+
+  const { error: membersError } = await supabase
+    .from("team_members")
+    .delete()
+    .eq("team_id", teamId);
+  if (membersError) throw membersError;
+
+  const { data: deletedTeam, error } = await supabase
+    .from("teams")
+    .delete()
+    .eq("id", teamId)
+    .select("id")
+    .maybeSingle();
+
+  if (!error && deletedTeam) {
+    return;
+  }
+
+  if (error && error.code !== "42501") {
+    throw error;
+  }
+
+  throw new Error("No se pudo borrar el equipo. Ejecutá la migración SQL que crea la función delete_team_for_coach.");
+}
+
+export async function updateTeamAvatar(teamId: string, coachUserId: string, fileUri: string): Promise<string> {
+  const { data: membership, error: membershipError } = await supabase
+    .from("team_members")
+    .select("id")
+    .eq("team_id", teamId)
+    .eq("user_id", coachUserId)
+    .eq("role", "coach")
+    .maybeSingle();
+
+  if (membershipError) throw membershipError;
+  if (!membership) throw new Error("No autorizado para editar el avatar del equipo.");
+
+  const path = `teams/${teamId}`;
+  const publicUrl = await uploadAvatarAtPath(path, fileUri);
+
+  const { data: updatedTeam, error } = await supabase
+    .from("teams")
+    .update({ avatar_url: publicUrl })
+    .eq("id", teamId)
+    .select("id")
+    .maybeSingle();
+
+  if (!error && updatedTeam) {
+    return publicUrl;
+  }
+
+  if (error && error.code !== "42501") {
+    throw error;
+  }
+
+  const { error: rpcError } = await supabase.rpc("set_team_avatar_url", {
+    p_team_id: teamId,
+    p_avatar_url: publicUrl,
+  });
+
+  if (!rpcError) {
+    return publicUrl;
+  }
+
+  if (rpcError.code === "42883") {
+    throw new Error("No hay permisos para guardar avatar_url del equipo. Ejecutá la migración SQL de funciones RPC.");
+  }
+
+  throw rpcError;
 }
 
 export async function getCoachDashboard(userId: string): Promise<{ team: Team; players: PlayerStat[] } | null> {
   // 1. Find coach's team
   const { data: membership } = await supabase
     .from("team_members")
-    .select("team_id, teams(id, name, invite_code)")
+    .select("team_id, teams(id, name, invite_code, avatar_url)")
     .eq("user_id", userId)
     .eq("role", "coach")
     .maybeSingle();
@@ -211,12 +376,15 @@ export async function getCoachDashboard(userId: string): Promise<{ team: Team; p
   // 3. Get profiles
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("id, display_name")
+    .select("id, display_name, avatar_url")
     .in("id", playerIds);
 
-  const nameMap: Record<string, string | null> = {};
+  const profileMap: Record<string, { display_name: string | null; avatar_url: string | null }> = {};
   (profiles ?? []).forEach((p: any) => {
-    nameMap[p.id] = p.display_name;
+    profileMap[p.id] = {
+      display_name: p.display_name ?? null,
+      avatar_url: p.avatar_url ?? null,
+    };
   });
 
   // 4. Get sessions per player
@@ -266,7 +434,8 @@ export async function getCoachDashboard(userId: string): Promise<{ team: Team; p
   const players: PlayerStat[] = playerIds
     .map((pId) => ({
       user_id: pId,
-      display_name: nameMap[pId] ?? null,
+      display_name: profileMap[pId]?.display_name ?? null,
+      avatar_url: profileMap[pId]?.avatar_url ?? null,
       sessions: sessionsByPlayer[pId]?.length ?? 0,
       attempts: aggByPlayer[pId]?.att ?? 0,
       makes: aggByPlayer[pId]?.mk ?? 0,
@@ -359,16 +528,19 @@ export async function getCoachSharedWorkouts(coachUserId: string): Promise<Coach
 
   const sharedRows = shared ?? [];
   const playerIds: string[] = [...new Set(sharedRows.map((s: any) => s.user_id as string))];
-  const nameMap: Record<string, string> = {};
+  const profileMap: Record<string, { name: string; avatarUrl: string | null }> = {};
 
   if (playerIds.length > 0) {
     const { data: profiles, error: profilesError } = await supabase
       .from("profiles")
-      .select("id, display_name")
+      .select("id, display_name, avatar_url")
       .in("id", playerIds);
     if (profilesError) throw profilesError;
     (profiles ?? []).forEach((p: any) => {
-      nameMap[p.id] = p.display_name ?? `#${p.id.slice(0, 6)}`;
+      profileMap[p.id] = {
+        name: p.display_name ?? `#${p.id.slice(0, 6)}`,
+        avatarUrl: p.avatar_url ?? null,
+      };
     });
   }
 
@@ -381,17 +553,37 @@ export async function getCoachSharedWorkouts(coachUserId: string): Promise<Coach
     sessionsGoal: s.sessions_goal ?? 0,
     sharedAt: s.shared_at,
     playerId: s.user_id,
-    playerName: nameMap[s.user_id] ?? `#${s.user_id.slice(0, 6)}`,
+    playerName: profileMap[s.user_id]?.name ?? `#${s.user_id.slice(0, 6)}`,
+    playerAvatarUrl: profileMap[s.user_id]?.avatarUrl ?? null,
   }));
 }
 
 export async function deleteCoachAccount(userId: string, teamId: string | null): Promise<void> {
   if (teamId) {
-    await supabase.from("team_members").delete().eq("team_id", teamId);
-    await supabase.from("teams").delete().eq("id", teamId);
+    await deleteTeam(teamId);
   }
-  await supabase.from("team_members").delete().eq("user_id", userId);
-  await supabase.from("profiles").delete().eq("id", userId);
+
+  {
+    const { error } = await supabase
+      .from("team_members")
+      .delete()
+      .eq("user_id", userId);
+    if (error) throw error;
+  }
+
+  {
+    const { data: deletedProfile, error } = await supabase
+      .from("profiles")
+      .delete()
+      .eq("id", userId)
+      .select("id")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!deletedProfile) {
+      throw new Error("No se pudo borrar el perfil del entrenador/a.");
+    }
+  }
 }
 
 export async function getSharedTeamWorkouts(teamId: string, userId: string): Promise<TeamWorkoutShare[]> {
@@ -479,11 +671,14 @@ export async function getCoachPlayersDetailed(coachUserId: string): Promise<Coac
 
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("id, display_name")
+    .select("id, display_name, avatar_url")
     .in("id", playerIds);
-  const nameMap: Record<string, string | null> = {};
+  const profileMap: Record<string, { display_name: string | null; avatar_url: string | null }> = {};
   (profiles ?? []).forEach((p: any) => {
-    nameMap[p.id] = p.display_name;
+    profileMap[p.id] = {
+      display_name: p.display_name ?? null,
+      avatar_url: p.avatar_url ?? null,
+    };
   });
 
   const { data: sessions } = await supabase
@@ -582,7 +777,8 @@ export async function getCoachPlayersDetailed(coachUserId: string): Promise<Coac
 
     return {
       user_id: uid,
-      display_name: nameMap[uid] ?? null,
+      display_name: profileMap[uid]?.display_name ?? null,
+      avatar_url: profileMap[uid]?.avatar_url ?? null,
       sessions: (sessionsByPlayer[uid] ?? []).length,
       attempts: att,
       makes: mk,

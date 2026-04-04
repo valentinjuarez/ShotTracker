@@ -1,19 +1,21 @@
 // app/(tabs)/profile.tsx
 import { deleteOwnAuthUser, getCurrentUserId, getCurrentUserIdentity, signOut } from "@/src/features/auth/services/auth.service";
-import { deleteUserAccount, getUserStats } from "@/src/features/profile/services/profile.service";
+import { deleteUserAccount, getCurrentUserProfile, getUserStats, updateUserAvatar } from "@/src/features/profile/services/profile.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  View,
+    ActivityIndicator,
+    Alert,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    View,
 } from "react-native";
 
 function pctColor(p: number) {
@@ -32,6 +34,10 @@ export default function Profile() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarStatus, setAvatarStatus] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [totalSessions, setTotalSessions] = useState<number | null>(null);
@@ -50,9 +56,14 @@ export default function Profile() {
 
   const loadData = useCallback(async () => {
     try {
-      const identity = await getCurrentUserIdentity();
+      const [identity, profile] = await Promise.all([
+        getCurrentUserIdentity(),
+        getCurrentUserProfile(),
+      ]);
+
       setName(identity.displayName);
       setEmail(identity.email);
+      setAvatarUrl(profile?.avatar_url ?? null);
 
       const userId = identity.id;
       if (!userId) return;
@@ -76,6 +87,46 @@ export default function Profile() {
   }, [loadData]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  async function onPickAvatar() {
+    try {
+      setAvatarError(null);
+      setAvatarStatus(null);
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        const msg = "Habilita acceso a fotos para cargar tu avatar.";
+        setAvatarError(msg);
+        Alert.alert("Permiso requerido", msg);
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+
+      const userId = await getCurrentUserId();
+      if (!userId) return;
+
+      setAvatarUploading(true);
+      setAvatarStatus("Subiendo foto...");
+      const url = await updateUserAvatar(userId, result.assets[0].uri);
+      setAvatarUrl(url);
+      setAvatarStatus("Foto actualizada correctamente.");
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      const msg = e?.message ?? "No se pudo actualizar la foto de perfil.";
+      setAvatarError(msg);
+      setAvatarStatus(null);
+      Alert.alert("Error", msg);
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
 
   async function onLogout() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -139,10 +190,19 @@ export default function Profile() {
             backgroundColor: "rgba(245,158,11,0.15)",
             borderWidth: 2, borderColor: "rgba(245,158,11,0.40)",
             alignItems: "center", justifyContent: "center",
+            overflow: "hidden",
           }}>
-            <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 26 }}>
-              {initials || "🏀"}
-            </Text>
+            {avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="cover"
+              />
+            ) : (
+              <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 26 }}>
+                {initials || "🏀"}
+              </Text>
+            )}
           </View>
           <View style={{ alignItems: "center", gap: 4 }}>
             <Text style={{ color: "white", fontWeight: "900", fontSize: 20, letterSpacing: -0.4 }}>
@@ -150,6 +210,34 @@ export default function Profile() {
             </Text>
             {email ? (
               <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 13 }}>{email}</Text>
+            ) : null}
+            <Pressable
+              onPress={onPickAvatar}
+              disabled={avatarUploading}
+              style={{
+                marginTop: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingVertical: 6,
+                paddingHorizontal: 10,
+                borderRadius: 10,
+                backgroundColor: "rgba(245,158,11,0.14)",
+                borderWidth: 1,
+                borderColor: "rgba(245,158,11,0.30)",
+                opacity: avatarUploading ? 0.7 : 1,
+              }}
+            >
+              <Ionicons name="camera-outline" size={13} color="#F59E0B" />
+              <Text style={{ color: "#F59E0B", fontWeight: "800", fontSize: 12 }}>
+                {avatarUploading ? "Subiendo..." : "Cambiar foto"}
+              </Text>
+            </Pressable>
+            {avatarStatus ? (
+              <Text style={{ color: "rgba(34,197,94,0.90)", fontSize: 12, marginTop: 2 }}>{avatarStatus}</Text>
+            ) : null}
+            {avatarError ? (
+              <Text style={{ color: "rgba(239,68,68,0.90)", fontSize: 12, marginTop: 2, textAlign: "center" }}>{avatarError}</Text>
             ) : null}
           </View>
         </View>

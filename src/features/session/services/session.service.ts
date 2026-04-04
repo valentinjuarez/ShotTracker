@@ -212,9 +212,23 @@ export async function getSessionAttemptsBySession(
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  await supabase.from("session_spots").delete().eq("session_id", sessionId);
-  const { error } = await supabase.from("sessions").delete().eq("id", sessionId);
+  const { error: spotsError } = await supabase
+    .from("session_spots")
+    .delete()
+    .eq("session_id", sessionId);
+  if (spotsError) throw spotsError;
+
+  const { data: deletedSession, error } = await supabase
+    .from("sessions")
+    .delete()
+    .eq("id", sessionId)
+    .select("id")
+    .maybeSingle();
+
   if (error) throw error;
+  if (!deletedSession) {
+    throw new Error("No se pudo borrar la sesión indicada.");
+  }
 }
 
 export async function getSessionNumber(sessionId: string): Promise<number> {

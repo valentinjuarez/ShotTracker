@@ -74,8 +74,10 @@ export function useCoachDashboardController() {
         .slice(0, 2)
         .join("")
     : "";
+  const avatarUrl = profile?.avatar_url ?? null;
 
   return {
+    avatarUrl,
     displayName,
     initials,
     isNameLoading,

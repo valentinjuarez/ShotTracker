@@ -1,9 +1,12 @@
 // app/(trainer)/profile.tsx  — Coach profile
 import { deleteOwnAuthUser, getCurrentUserId, signOut } from "@/src/features/auth/services/auth.service";
+import { updateUserAvatar } from "@/src/features/profile/services/profile.service";
 import { deleteCoachAccount, deleteTeam, getCoachTeamId, getTeamStats } from "@/src/features/team/services/team.service";
 import { useProfile } from "@/src/hooks/useProfile";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -24,9 +27,12 @@ const card = {
 } as const;
 
 export default function CoachProfile() {
-  const { profile, loading: profileLoading, refetch } = useProfile();
+  const { profile, refetch } = useProfile();
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarStatus, setAvatarStatus] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [teamStats, setTeamStats]   = useState<{
     players: number; totalSessions: number; totalAttempts: number; teamPct: number | null;
   } | null>(null);
@@ -61,6 +67,46 @@ export default function CoachProfile() {
   }, [refetch, loadStats]);
 
   useEffect(() => { loadStats(); }, [loadStats]);
+
+  async function onPickAvatar() {
+    try {
+      setAvatarError(null);
+      setAvatarStatus(null);
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        const msg = "Habilita acceso a fotos para cargar tu avatar.";
+        setAvatarError(msg);
+        Alert.alert("Permiso requerido", msg);
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+
+      const userId = await getCurrentUserId();
+      if (!userId) return;
+
+      setAvatarUploading(true);
+      setAvatarStatus("Subiendo foto...");
+      await updateUserAvatar(userId, result.assets[0].uri);
+      await Promise.all([refetch(), loadStats()]);
+      setAvatarStatus("Foto actualizada correctamente.");
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      const msg = e?.message ?? "No se pudo actualizar la foto de perfil.";
+      setAvatarError(msg);
+      setAvatarStatus(null);
+      Alert.alert("Error", msg);
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
 
   async function onLogout() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -148,15 +194,52 @@ export default function CoachProfile() {
             backgroundColor: "rgba(99,179,237,0.12)",
             borderWidth: 2, borderColor: "rgba(99,179,237,0.35)",
             alignItems: "center", justifyContent: "center",
+            overflow: "hidden",
           }}>
-            <Text style={{ color: "rgba(99,179,237,1)", fontWeight: "900", fontSize: 26 }}>
-              {initials || "🏅"}
-            </Text>
+            {profile?.avatar_url ? (
+              <Image
+                source={{ uri: profile.avatar_url }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="cover"
+              />
+            ) : (
+              <Text style={{ color: "rgba(99,179,237,1)", fontWeight: "900", fontSize: 26 }}>
+                {initials || "🏅"}
+              </Text>
+            )}
           </View>
           <View style={{ alignItems: "center", gap: 6 }}>
             <Text style={{ color: "white", fontWeight: "900", fontSize: 20, letterSpacing: -0.4 }}>
               {displayName}
             </Text>
+            <Pressable
+              onPress={onPickAvatar}
+              disabled={avatarUploading}
+              style={{
+                marginTop: 4,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingVertical: 6,
+                paddingHorizontal: 10,
+                borderRadius: 10,
+                backgroundColor: "rgba(99,179,237,0.15)",
+                borderWidth: 1,
+                borderColor: "rgba(99,179,237,0.28)",
+                opacity: avatarUploading ? 0.7 : 1,
+              }}
+            >
+              <Ionicons name="camera-outline" size={13} color="rgba(99,179,237,0.95)" />
+              <Text style={{ color: "rgba(99,179,237,0.95)", fontWeight: "800", fontSize: 12 }}>
+                {avatarUploading ? "Subiendo..." : "Cambiar foto"}
+              </Text>
+            </Pressable>
+            {avatarStatus ? (
+              <Text style={{ color: "rgba(34,197,94,0.90)", fontSize: 12 }}>{avatarStatus}</Text>
+            ) : null}
+            {avatarError ? (
+              <Text style={{ color: "rgba(239,68,68,0.90)", fontSize: 12, textAlign: "center" }}>{avatarError}</Text>
+            ) : null}
             <View style={{
               paddingVertical: 4, paddingHorizontal: 12, borderRadius: 999,
               backgroundColor: "rgba(99,179,237,0.12)",

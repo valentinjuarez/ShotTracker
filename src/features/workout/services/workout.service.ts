@@ -204,8 +204,16 @@ export async function deleteWorkoutWithSessions(workoutId: string): Promise<void
     if (sessionsError) throw sessionsError;
   }
 
-  const { error } = await supabase.from("workouts").delete().eq("id", workoutId);
+  const { data: deletedWorkout, error } = await supabase
+    .from("workouts")
+    .delete()
+    .eq("id", workoutId)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  if (!deletedWorkout) {
+    throw new Error("No se pudo borrar la planilla indicada.");
+  }
 }
 
 export async function getWorkoutSessionsDetailed(workoutId: string): Promise<WorkoutSessionDetail[]> {

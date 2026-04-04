@@ -11,6 +11,7 @@ import {
 } from "@/src/features/team/services/team.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -34,6 +35,7 @@ type Team = {
   id: string;
   name: string;
   invite_code: string;
+  avatar_url?: string | null;
 };
 
 type MemberRow = {
@@ -42,6 +44,7 @@ type MemberRow = {
   role: "player" | "coach";
   joined_at: string;
   display_name: string | null;
+  avatar_url?: string | null;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -420,7 +423,15 @@ function TeamCard({
           borderWidth: 2, borderColor: "rgba(99,179,237,0.40)",
           alignItems: "center", justifyContent: "center",
         }}>
-          <Ionicons name="shield-half-outline" size={30} color="rgba(99,179,237,0.90)" />
+          {team.avatar_url ? (
+            <Image
+              source={{ uri: team.avatar_url }}
+              style={{ width: 60, height: 60, borderRadius: 18 }}
+              contentFit="cover"
+            />
+          ) : (
+            <Ionicons name="shield-half-outline" size={30} color="rgba(99,179,237,0.90)" />
+          )}
         </View>
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={{ color: "white", fontWeight: "900", fontSize: 20, letterSpacing: -0.4 }}>
@@ -532,11 +543,19 @@ function MemberItem({ member, isMe }: { member: MemberRow; isMe: boolean }) {
         borderWidth: 1, borderColor: isMe ? "rgba(245,158,11,0.30)" : "rgba(255,255,255,0.10)",
         alignItems: "center", justifyContent: "center",
       }}>
-        <Ionicons
-          name="person-outline"
-          size={16}
-          color={isMe ? "rgba(245,158,11,0.90)" : "rgba(255,255,255,0.45)"}
-        />
+        {member.avatar_url ? (
+          <Image
+            source={{ uri: member.avatar_url }}
+            style={{ width: 34, height: 34, borderRadius: 17 }}
+            contentFit="cover"
+          />
+        ) : (
+          <Ionicons
+            name="person-outline"
+            size={16}
+            color={isMe ? "rgba(245,158,11,0.90)" : "rgba(255,255,255,0.45)"}
+          />
+        )}
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{

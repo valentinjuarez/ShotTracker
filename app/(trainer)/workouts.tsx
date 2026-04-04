@@ -5,6 +5,7 @@ import { getCoachSharedWorkouts } from "@/src/features/team/services/team.servic
 import { getWorkoutSessionsDetailed, WorkoutSessionDetail } from "@/src/features/workout/services/workout.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -33,6 +34,7 @@ type WorkoutEntry = {
   sharedAt:     string | null;
   playerId:     string;
   playerName:   string;
+  playerAvatarUrl?: string | null;
 };
 
 type SessionRow = {
@@ -118,9 +120,11 @@ export default function WorkoutsScreen() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const byPlayer = useMemo(() => {
-    const map = new Map<string, { name: string; items: WorkoutEntry[] }>();
+    const map = new Map<string, { name: string; avatarUrl?: string | null; items: WorkoutEntry[] }>();
     entries.forEach((e) => {
-      if (!map.has(e.playerId)) map.set(e.playerId, { name: e.playerName, items: [] });
+      if (!map.has(e.playerId)) {
+        map.set(e.playerId, { name: e.playerName, avatarUrl: e.playerAvatarUrl ?? null, items: [] });
+      }
       map.get(e.playerId)!.items.push(e);
     });
     return map;
@@ -129,7 +133,7 @@ export default function WorkoutsScreen() {
   const filteredByPlayer = useMemo(() => {
     if (!search.trim()) return byPlayer;
     const q = search.trim().toLowerCase();
-    const out = new Map<string, { name: string; items: WorkoutEntry[] }>();
+    const out = new Map<string, { name: string; avatarUrl?: string | null; items: WorkoutEntry[] }>();
     byPlayer.forEach((val, key) => {
       if (val.name.toLowerCase().includes(q)) out.set(key, val);
     });
@@ -199,8 +203,8 @@ export default function WorkoutsScreen() {
             <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 14 }}>{`Sin resultados para "${search}"`}</Text>
           </View>
         ) : (
-          Array.from(filteredByPlayer.entries()).map(([playerId, { name, items }]) => (
-            <PlayerSection key={playerId} playerName={name} workouts={items} />
+          Array.from(filteredByPlayer.entries()).map(([playerId, { name, avatarUrl, items }]) => (
+            <PlayerSection key={playerId} playerName={name} playerAvatarUrl={avatarUrl ?? null} workouts={items} />
           ))
         )}
       </ScrollView>
@@ -232,7 +236,15 @@ function EmptyState() {
 
 // ─── Player section (collapsible) ────────────────────────────────────────────
 
-function PlayerSection({ playerName, workouts }: { playerName: string; workouts: WorkoutEntry[] }) {
+function PlayerSection({
+  playerName,
+  playerAvatarUrl,
+  workouts,
+}: {
+  playerName: string;
+  playerAvatarUrl?: string | null;
+  workouts: WorkoutEntry[];
+}) {
   const [expanded, setExpanded] = useState(false);
   const rotateAnim = useRef(new Animated.Value(0)).current;
 
@@ -268,8 +280,17 @@ function PlayerSection({ playerName, workouts }: { playerName: string; workouts:
           backgroundColor: "rgba(245,158,11,0.15)",
           borderWidth: 1.5, borderColor: "rgba(245,158,11,0.35)",
           alignItems: "center", justifyContent: "center",
+          overflow: "hidden",
         }}>
-          <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 16 }}>{initial}</Text>
+          {playerAvatarUrl ? (
+            <Image
+              source={{ uri: playerAvatarUrl }}
+              style={{ width: "100%", height: "100%" }}
+              contentFit="cover"
+            />
+          ) : (
+            <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 16 }}>{initial}</Text>
+          )}
         </View>
 
         {/* Name + summary row */}
