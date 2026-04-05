@@ -5,11 +5,7 @@ import { Platform } from "react-native";
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!url || !anonKey) {
-  throw new Error(
-    "Faltan EXPO_PUBLIC_SUPABASE_URL o EXPO_PUBLIC_SUPABASE_ANON_KEY en el .env"
-  );
-}
+const hasSupabaseConfig = Boolean(url && anonKey);
 
 const authStorage = {
   getItem: async (key: string) => {
@@ -41,12 +37,33 @@ const authStorage = {
   },
 };
 
-export const supabase = createClient(url, anonKey, {
-  auth: {
-    storage: authStorage,
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: false, // importante en RN
-    flowType: "pkce",          // código llega como ?code= en vez de #fragment
-  },
-});
+function createNoopSupabase() {
+  const noopResponse = { data: null, error: null };
+
+  return {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+      signOut: async () => noopResponse,
+    },
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => noopResponse,
+        }),
+      }),
+    }),
+  } as any;
+}
+
+export const supabase = hasSupabaseConfig
+  ? createClient(url!, anonKey!, {
+      auth: {
+        storage: authStorage,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false, // importante en RN
+        flowType: "pkce",          // código llega como ?code= en vez de #fragment
+      },
+    })
+  : createNoopSupabase();
