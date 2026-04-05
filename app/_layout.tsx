@@ -173,10 +173,11 @@ function AuthGate({ session, onRoleReady }: { session: Session | null; onRoleRea
     const inTrainer = segments[0] === "(trainer)";
     const inPrivacy = segments[0] === "privacy";
     const inResetPw = segments[0] === "reset-password";
-    const inConfirm = segments[0] === "confirm";
+    const inConfirm  = segments[0] === "confirm";
+    const inRoot     = segments.length === 0 || segments[0] === "index";
 
     // Public routes — never redirect away
-    if (inPrivacy || inResetPw || inConfirm) return;
+    if (inPrivacy || inResetPw || inConfirm || inRoot) return;
 
     if (!session && !inAuth) {
       router.replace("/(auth)/login");
