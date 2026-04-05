@@ -2,10 +2,11 @@
 import { ALL_SPOTS } from "@/src/data/spots";
 import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import { getCoachPlayersDetailed } from "@/src/features/team/services/team.service";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Modal,
@@ -121,12 +122,12 @@ export default function PlayersScreen() {
     }
   }, []);
 
+  useAutoRefreshOnFocus(loadData, { intervalMs: 30000 });
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
   }, [loadData]);
-
-  useEffect(() => { loadData(); }, [loadData]);
 
   const filtered = useMemo(() => {
     let list = [...players];
@@ -134,9 +135,9 @@ export default function PlayersScreen() {
       const q = search.trim().toLowerCase();
       list = list.filter((p) => (p.display_name ?? "").toLowerCase().includes(q));
     }
-    if (sort === "pct")      list.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));
+    if (sort === "pct") list.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));
     if (sort === "sessions") list.sort((a, b) => b.sessions - a.sessions);
-    if (sort === "name")     list.sort((a, b) => (a.display_name ?? "").localeCompare(b.display_name ?? ""));
+    if (sort === "name") list.sort((a, b) => (a.display_name ?? "").localeCompare(b.display_name ?? ""));
     return list;
   }, [players, search, sort]);
 

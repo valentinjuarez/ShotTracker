@@ -1,6 +1,7 @@
 // src/hooks/useProfile.ts
 import { getCurrentUserProfile, type Profile } from "@/src/features/profile/services/profile.service";
-import { useCallback, useEffect, useState } from "react";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
+import { useCallback, useState } from "react";
 
 export function useProfile() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -21,7 +22,7 @@ export function useProfile() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useAutoRefreshOnFocus(load, { intervalMs: 30000 });
 
   return { profile, loading, error, refetch: load };
 }

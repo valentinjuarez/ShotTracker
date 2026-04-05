@@ -1,10 +1,11 @@
 // app/(trainer)/compare.tsx — Head-to-head player comparison
 import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import { getCoachPlayersDetailed } from "@/src/features/team/services/team.service";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     Modal,
@@ -92,45 +93,44 @@ export default function CompareScreen() {
   const [loadingB, setLoadingB] = useState(false);
   const [loadingRoster, setLoadingRoster] = useState(true);
 
-  // Load team roster once
-  useEffect(() => {
-    (async () => {
-      const uid = await getCurrentUserId();
-      if (!uid) return;
-      const detailed = await getCoachPlayersDetailed(uid);
-      const map: Record<string, PlayerSummary> = {};
+  const loadRoster = useCallback(async () => {
+    const uid = await getCurrentUserId();
+    if (!uid) return;
+    const detailed = await getCoachPlayersDetailed(uid);
+    const map: Record<string, PlayerSummary> = {};
 
-      detailed.forEach((p) => {
-        const triples = p.spotBreakdown.filter((s) => s.shot_type === "3PT");
-        const doubles = p.spotBreakdown.filter((s) => s.shot_type !== "3PT");
+    detailed.forEach((p) => {
+      const triples = p.spotBreakdown.filter((s) => s.shot_type === "3PT");
+      const doubles = p.spotBreakdown.filter((s) => s.shot_type !== "3PT");
 
-        map[p.user_id] = {
-          user_id: p.user_id,
-          display_name: p.display_name ?? `#${p.user_id.slice(0, 6)}`,
-          avatar_url: p.avatar_url ?? null,
-          sessions: p.sessions,
-          attempts: p.attempts,
-          makes: p.makes,
-          pct: p.pct,
-          tripleAtt: triples.reduce((a, s) => a + s.attempts, 0),
-          tripleMk: triples.reduce((a, s) => a + s.makes, 0),
-          doubleAtt: doubles.reduce((a, s) => a + s.attempts, 0),
-          doubleMk: doubles.reduce((a, s) => a + s.makes, 0),
-          spotBreakdown: p.spotBreakdown,
-        };
-      });
+      map[p.user_id] = {
+        user_id: p.user_id,
+        display_name: p.display_name ?? `#${p.user_id.slice(0, 6)}`,
+        avatar_url: p.avatar_url ?? null,
+        sessions: p.sessions,
+        attempts: p.attempts,
+        makes: p.makes,
+        pct: p.pct,
+        tripleAtt: triples.reduce((a, s) => a + s.attempts, 0),
+        tripleMk: triples.reduce((a, s) => a + s.makes, 0),
+        doubleAtt: doubles.reduce((a, s) => a + s.attempts, 0),
+        doubleMk: doubles.reduce((a, s) => a + s.makes, 0),
+        spotBreakdown: p.spotBreakdown,
+      };
+    });
 
-      setDetailsById(map);
-      setRoster(
-        detailed.map((p) => ({
-          user_id: p.user_id,
-          display_name: p.display_name ?? `#${p.user_id.slice(0, 6)}`,
-          avatar_url: p.avatar_url ?? null,
-        }))
-      );
-      setLoadingRoster(false);
-    })();
+    setDetailsById(map);
+    setRoster(
+      detailed.map((p) => ({
+        user_id: p.user_id,
+        display_name: p.display_name ?? `#${p.user_id.slice(0, 6)}`,
+        avatar_url: p.avatar_url ?? null,
+      }))
+    );
+    setLoadingRoster(false);
   }, []);
+
+  useAutoRefreshOnFocus(loadRoster, { intervalMs: 30000 });
 
   const loadPlayer = useCallback(async (stub: PlayerStub, slot: "A" | "B") => {
     const setter = slot === "A" ? setLoadingA : setLoadingB;

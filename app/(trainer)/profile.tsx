@@ -2,13 +2,14 @@
 import { deleteOwnAuthUser, getCurrentUserId, signOut } from "@/src/features/auth/services/auth.service";
 import { updateUserAvatar } from "@/src/features/profile/services/profile.service";
 import { deleteCoachAccount, deleteTeam, getCoachTeamId, getTeamStats } from "@/src/features/team/services/team.service";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 import { useProfile } from "@/src/hooks/useProfile";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -60,13 +61,13 @@ export default function CoachProfile() {
     }
   }, []);
 
+  useAutoRefreshOnFocus(loadStats, { intervalMs: 30000 });
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([refetch(), loadStats()]);
     setRefreshing(false);
   }, [refetch, loadStats]);
-
-  useEffect(() => { loadStats(); }, [loadStats]);
 
   async function onPickAvatar() {
     try {

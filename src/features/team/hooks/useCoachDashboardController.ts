@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import * as Haptics from "expo-haptics";
 
 import { getCurrentUserId, signOut } from "@/src/features/auth/services/auth.service";
 import { getCoachDashboard, type PlayerStat, type Team } from "@/src/features/team/services/team.service";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 import { useProfile } from "@/src/hooks/useProfile";
 
 export function useCoachDashboardController() {
@@ -36,9 +37,7 @@ export function useCoachDashboardController() {
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useAutoRefreshOnFocus(loadData, { intervalMs: 30000 });
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

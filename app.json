@@ -2,7 +2,7 @@
   "expo": {
     "name": "Shot Tracker",
     "slug": "shottracker",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "shottracker",
@@ -11,14 +11,14 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.valentinjuarez.shottracker",
-      "buildNumber": "3",
+      "buildNumber": "6",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.valentinjuarez.shottracker",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#0B1220",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -57,6 +57,12 @@
         "projectId": "1d5a991e-3d82-42c4-bae0-7d57f5c1ec32"
       }
     },
-    "owner": "valentinjuarez"
+    "owner": "valentinjuarez",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/1d5a991e-3d82-42c4-bae0-7d57f5c1ec32"
+    }
   }
 }

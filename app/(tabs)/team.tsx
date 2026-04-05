@@ -9,6 +9,7 @@ import {
   shareWorkoutWithTeam,
   unshareWorkoutWithTeam,
 } from "@/src/features/team/services/team.service";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -72,6 +73,7 @@ export default function TeamScreen() {
   const [userId, setUserId]       = useState<string | null>(null);
   const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [sharedRefreshKey, setSharedRefreshKey] = useState(0);
 
   // Team state
   const [team, setTeam]           = useState<Team | null>(null);
@@ -117,12 +119,21 @@ export default function TeamScreen() {
     }
   }, [fadeAnim]);
 
+  const bumpSharedRefresh = useCallback(() => {
+    setSharedRefreshKey((prev) => prev + 1);
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    await loadData();
+    bumpSharedRefresh();
+  }, [bumpSharedRefresh, loadData]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadData();
-  }, [loadData]);
+    await refreshAll();
+  }, [refreshAll]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useAutoRefreshOnFocus(refreshAll, { intervalMs: 30000 });
 
   // ─── Join team ──────────────────────────────────────────────────────────────
 
@@ -141,7 +152,7 @@ export default function TeamScreen() {
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setCodeInput("");
-      await loadData();
+      await refreshAll();
     } catch (e: any) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert("Error", e?.message ?? "No se pudo unir al equipo.");
@@ -175,6 +186,7 @@ export default function TeamScreen() {
       setTeam(null);
       setMembers([]);
       setMyRole(null);
+      bumpSharedRefresh();
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "No se pudo salir del equipo.");
     } finally {
@@ -226,7 +238,7 @@ export default function TeamScreen() {
             <Animated.View style={{ opacity: fadeAnim, gap: 18 }}>
               <TeamCard team={team} memberCount={members.length} myRole={myRole} />
               <MembersCard members={members} userId={userId} />
-              <SharedSection team={team} userId={userId} />
+              <SharedSection team={team} userId={userId} refreshKey={sharedRefreshKey} />
               <LeaveBtn onPress={confirmLeave} loading={leaving} />
             </Animated.View>
           ) : (
@@ -582,13 +594,26 @@ function MemberItem({ member, isMe }: { member: MemberRow; isMe: boolean }) {
   );
 }
 
-function SharedSection({ team, userId }: { team: Team; userId: string | null }) {
+function SharedSection({
+  team,
+  userId,
+  refreshKey,
+}: {
+  team: Team;
+  userId: string | null;
+  refreshKey: number;
+}) {
   const [sharedWorkouts, setSharedWorkouts] = useState<{ id: string; title: string; status: string }[]>([]);
   const [loading, setLoading]   = useState(true);
   const [showPicker, setShowPicker] = useState(false);
 
   const loadShared = useCallback(async () => {
-    if (!userId) return;
+    if (!userId) {
+      setSharedWorkouts([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const rows = await getSharedTeamWorkouts(team.id, userId);
@@ -600,7 +625,8 @@ function SharedSection({ team, userId }: { team: Team; userId: string | null }) 
     }
   }, [userId, team.id]);
 
-  useEffect(() => { loadShared(); }, [loadShared]);
+  useEffect(() => { loadShared(); }, [loadShared, refreshKey]);
+  useAutoRefreshOnFocus(loadShared, { intervalMs: 30000 });
 
   return (
     <View style={[card, { gap: 16 }]}>

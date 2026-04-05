@@ -1,12 +1,13 @@
 // app/(tabs)/profile.tsx
 import { deleteOwnAuthUser, getCurrentUserId, getCurrentUserIdentity, signOut } from "@/src/features/auth/services/auth.service";
 import { deleteUserAccount, getCurrentUserProfile, getUserStats, updateUserAvatar } from "@/src/features/profile/services/profile.service";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -81,12 +82,12 @@ export default function Profile() {
     }
   }, []);
 
+  useAutoRefreshOnFocus(loadData, { intervalMs: 30000 });
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
   }, [loadData]);
-
-  useEffect(() => { loadData(); }, [loadData]);
 
   async function onPickAvatar() {
     try {

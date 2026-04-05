@@ -1,23 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 
 import {
-    getCurrentUserId,
-    getCurrentUserMetadata,
-    signOut,
+  getCurrentUserId,
+  getCurrentUserMetadata,
+  signOut,
 } from "@/src/features/auth/services/auth.service";
 import { getCurrentUserProfile } from "@/src/features/profile/services/profile.service";
 import {
-    getSessionAttemptsBySession,
-    getSessionHistory,
-    type SessionRow,
+  getSessionAttemptsBySession,
+  getSessionHistory,
+  type SessionRow,
 } from "@/src/features/session/services/session.service";
 import {
-    createNextWorkoutSession,
-    getLatestWorkoutProgress,
+  createNextWorkoutSession,
+  getLatestWorkoutProgress,
 } from "@/src/features/workout/services/workout.service";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 
 export type SpotAgg = { attempts: number; makes: number };
 
@@ -115,9 +116,7 @@ export function usePlayerHomeController() {
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useAutoRefreshOnFocus(loadData, { intervalMs: 30000 });
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
