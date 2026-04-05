@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Session } from "@supabase/supabase-js";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, usePathname } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Text, View } from "react-native";
 
@@ -136,6 +136,7 @@ import { useEffect as useEffect2, useState as useState2 } from "react";
 function AuthGate({ session, onRoleReady }: { session: Session | null; onRoleReady: () => void }) {
   const router   = useRouter();
   const segments = useSegments();
+  const pathname  = usePathname();
   const [role, setRole] = useState2<"player" | "coach" | null>(null);
   const [roleReady, setRoleReady] = useState2(false);
 
@@ -174,7 +175,7 @@ function AuthGate({ session, onRoleReady }: { session: Session | null; onRoleRea
     const inPrivacy = segments[0] === "privacy";
     const inResetPw = segments[0] === "reset-password";
     const inConfirm  = segments[0] === "confirm";
-    const inRoot     = segments.length === 0 || segments[0] === "index";
+    const inRoot     = pathname === "/" || segments.length === 0 || segments[0] === "index";
 
     // Public routes — never redirect away
     if (inPrivacy || inResetPw || inConfirm || inRoot) return;
