@@ -4,9 +4,11 @@ import { deleteSession } from "@/src/features/session/services/session.service";
 import {
     deleteWorkoutWithSessions,
     getUserWorkouts,
+    getWorkoutSessionCountsByWorkoutIds,
     getWorkoutSessions,
     SessionRow,
     WorkoutRow,
+    WorkoutSessionCounts,
 } from "@/src/features/workout/services/workout.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -57,6 +59,7 @@ function useFadeSlide(delay = 0) {
 export default function WorkoutHistory() {
   const router = useRouter();
   const [workouts, setWorkouts]   = useState<WorkoutRow[]>([]);
+  const [sessionCountsMap, setSessionCountsMap] = useState<Record<string, WorkoutSessionCounts>>({});
   const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -76,6 +79,9 @@ export default function WorkoutHistory() {
 
       const workoutsList = await getUserWorkouts(userId);
       setWorkouts(workoutsList);
+
+      const counts = await getWorkoutSessionCountsByWorkoutIds(workoutsList.map((w) => w.id));
+      setSessionCountsMap(counts);
     } catch {
       // silent
     } finally {
@@ -213,15 +219,16 @@ export default function WorkoutHistory() {
             {workouts.map((w, i) => {
               const isExpanded = expanded[w.id] ?? false;
               const sessions   = sessionsMap[w.id] ?? [];
+              const counts = sessionCountsMap[w.id] ?? { total: 0, done: 0 };
               const isSessLoading = loadingSess[w.id] ?? false;
               const isDone     = w.status === "DONE";
-              const doneSess   = sessions.filter((s) => s.status === "DONE").length;
 
               return (
                 <WorkoutCard
                   key={w.id}
                   workout={w}
                   isDone={isDone}
+                  precomputedDoneSessions={counts.done}
                   sessions={sessions}
                   isSessLoading={isSessLoading}
                   isExpanded={isExpanded}
@@ -256,10 +263,11 @@ export default function WorkoutHistory() {
 // ─── WorkoutCard ──────────────────────────────────────────────────────────────
 
 function WorkoutCard({
-  workout, isDone, sessions, isSessLoading, isExpanded, onToggle, onSessionPress, onDeleteWorkout, onDeleteSession, delay,
+  workout, isDone, precomputedDoneSessions, sessions, isSessLoading, isExpanded, onToggle, onSessionPress, onDeleteWorkout, onDeleteSession, delay,
 }: {
   workout: WorkoutRow;
   isDone: boolean;
+  precomputedDoneSessions: number;
   sessions: SessionRow[];
   isSessLoading: boolean;
   isExpanded: boolean;
@@ -269,7 +277,7 @@ function WorkoutCard({
   onDeleteSession: (s: SessionRow) => void;
   delay: number;
 }) {
-  const doneSessions = sessions.filter((s) => s.status === "DONE").length;
+  const doneSessions = precomputedDoneSessions;
   const totalGoal    = workout.sessions_goal ?? 0;
   const progress     = totalGoal > 0 ? Math.min(1, doneSessions / totalGoal) : 0;
 
@@ -332,7 +340,7 @@ function WorkoutCard({
                 borderWidth: 1, borderColor: "rgba(255,255,255,0.09)",
               }}>
                 <Text style={{ color: "rgba(255,255,255,0.40)", fontWeight: "700", fontSize: 10 }}>
-                  {workout.shot_type === "3PT" ? "Triples" : "Dobles"}
+                  {workout.shot_type === "3PT" ? "Triples" : workout.shot_type === "2PT" ? "Dobles" : "Personalizada"}
                 </Text>
               </View>
               <Text style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>

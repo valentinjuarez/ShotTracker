@@ -1,6 +1,7 @@
 // app/(trainer)/index.tsx  — Coach dashboard
 import { useCoachDashboardController } from "@/src/features/team/hooks/useCoachDashboardController";
 import type { PlayerStat } from "@/src/features/team/services/team.service";
+import { HelpHint } from "@/src/shared/components/ui/HelpHint";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
@@ -291,6 +292,12 @@ function NoTeamState({ onCreateTeam }: { onCreateTeam: () => void }) {
         <Ionicons name="add-circle-outline" size={18} color="#0B1220" />
         <Text style={{ color: "#0B1220", fontWeight: "900", fontSize: 14 }}>Crear mi equipo</Text>
       </Pressable>
+      <HelpHint
+        storageKey="@onboarding_trainer_dash_create_team"
+        title="Crear mi equipo"
+        message="Creá el equipo una sola vez. Después compartís el código para que se unan jugadoras y puedas ver su rendimiento."
+        align="left"
+      />
     </View>
   );
 }

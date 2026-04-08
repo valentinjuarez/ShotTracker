@@ -558,9 +558,25 @@ export async function getCoachSharedWorkouts(coachUserId: string): Promise<Coach
   }));
 }
 
-export async function deleteCoachAccount(userId: string, teamId: string | null): Promise<void> {
-  if (teamId) {
-    await deleteTeam(teamId);
+export async function deleteCoachAccount(userId: string, teamId?: string | null): Promise<void> {
+  // Resolve coached teams from DB to avoid relying on stale UI state.
+  const { data: coachedMemberships, error: coachedTeamsError } = await supabase
+    .from("team_members")
+    .select("team_id")
+    .eq("user_id", userId)
+    .eq("role", "coach");
+
+  if (coachedTeamsError) throw coachedTeamsError;
+
+  const teamIds = [
+    ...new Set([
+      ...(coachedMemberships ?? []).map((m: any) => m.team_id as string),
+      ...(teamId ? [teamId] : []),
+    ].filter(Boolean)),
+  ];
+
+  for (const coachedTeamId of teamIds) {
+    await deleteTeam(coachedTeamId);
   }
 
   {
@@ -580,9 +596,7 @@ export async function deleteCoachAccount(userId: string, teamId: string | null):
       .maybeSingle();
 
     if (error) throw error;
-    if (!deletedProfile) {
-      throw new Error("No se pudo borrar el perfil del entrenador/a.");
-    }
+    if (!deletedProfile) return;
   }
 }
 

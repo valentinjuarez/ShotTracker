@@ -5,10 +5,10 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert } from "react-native";
 
 import { ALL_SPOTS } from "@/src/data/spots";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import {
     finishSession as finishSessionInDb,
     finishWorkoutIfComplete,
-    getCurrentUserId,
     loadSessionSpots,
     markSessionInProgress,
     updateSessionSpotMakes,

@@ -10,6 +10,8 @@ export function Court({
   selectedIds,
   onToggleSpot,
   highlightedSpotId,
+  snapToNearest = false,
+  hitRadius = 42,
 }: {
   width?: number;
   height?: number;
@@ -17,6 +19,8 @@ export function Court({
   selectedIds: Set<string>;
   onToggleSpot: (id: string) => void;
   highlightedSpotId?: string;
+  snapToNearest?: boolean;
+  hitRadius?: number;
 }) {
   const padX = width * 0.04;
   const padTop = height * 0.03;
@@ -52,6 +56,33 @@ export function Court({
   const threeStartAngle = cartesianToAngle(rimX, rimY, cornerXLeft, cornerBreakY);
   const threeEndAngle = cartesianToAngle(rimX, rimY, cornerXRight, cornerBreakY);
 
+  function toggleClosestSpot(x: number, y: number) {
+    let closest: { id: string; dist: number } | null = null;
+
+    for (const s of spots) {
+      const cx = left + s.x * courtW;
+      const cy = top + s.y * courtH;
+      const dx = x - cx;
+      const dy = y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (!closest || dist < closest.dist) {
+        closest = { id: s.id, dist };
+      }
+    }
+
+    if (closest && closest.dist <= hitRadius) {
+      onToggleSpot(closest.id);
+    }
+  }
+
+  function onCourtPress(e: any) {
+    if (!snapToNearest) return;
+    const x = e?.nativeEvent?.locationX;
+    const y = e?.nativeEvent?.locationY;
+    if (typeof x !== "number" || typeof y !== "number") return;
+    toggleClosestSpot(x, y);
+  }
+
   return (
     <View
       style={{
@@ -64,7 +95,7 @@ export function Court({
         borderColor: "rgba(255,255,255,0.10)",
       }}
     >
-      <Svg width={width} height={height}>
+      <Svg width={width} height={height} onPress={snapToNearest ? onCourtPress : undefined}>
         <Rect x="0" y="0" width={width} height={height} fill="rgba(0,0,0,0.25)" />
 
         <Rect
@@ -168,7 +199,13 @@ export function Court({
                 />
               )}
 
-              <Circle cx={cx} cy={cy} r={36} fill="transparent" onPress={() => onToggleSpot(s.id)} />
+              <Circle
+                cx={cx}
+                cy={cy}
+                r={hitRadius}
+                fill="transparent"
+                onPress={snapToNearest ? undefined : () => onToggleSpot(s.id)}
+              />
 
               <Circle
                 cx={cx}

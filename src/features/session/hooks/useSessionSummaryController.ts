@@ -13,6 +13,7 @@ import {
 } from "@/src/features/session/services/session.service";
 import { getUserTeam, isWorkoutSharedWithTeam, shareWorkoutWithTeam } from "@/src/features/team/services/team.service";
 import {
+    applyWorkoutTargetsToSession,
     createNextWorkoutSession,
     getWorkoutMetadata,
     type WorkoutData,
@@ -98,6 +99,7 @@ export function useSessionSummaryController() {
       setSavingNext(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const nextSessionId = await createNextWorkoutSession(workoutId);
+      await applyWorkoutTargetsToSession(nextSessionId, workoutId);
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace({

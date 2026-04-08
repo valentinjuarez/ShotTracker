@@ -1,6 +1,7 @@
 // app/(trainer)/create-team.tsx — Create team screen
 import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import { createTeam, updateTeamAvatar } from "@/src/features/team/services/team.service";
+import { HelpHint } from "@/src/shared/components/ui/HelpHint";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
@@ -155,9 +156,16 @@ export default function CreateTeam() {
             }}>
               <Ionicons name="shield-half-outline" size={30} color="rgba(99,179,237,0.90)" />
             </View>
-            <Text style={{ color: "white", fontSize: 26, fontWeight: "900", letterSpacing: -0.6, marginBottom: 6 }}>
-              Crear equipo
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={{ color: "white", fontSize: 26, fontWeight: "900", letterSpacing: -0.6, marginBottom: 6 }}>
+                Crear equipo
+              </Text>
+              <HelpHint
+                storageKey="@onboarding_trainer_create_team"
+                title="Crear equipo"
+                message="Al crearlo se genera un código para invitar jugadoras. Luego vas a poder ver sus estadísticas y planillas compartidas."
+              />
+            </View>
             <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 14, lineHeight: 20 }}>
               Elegí un nombre y compartí el código{"\n"}de invitación con tus jugadores.
             </Text>
@@ -265,6 +273,13 @@ export default function CreateTeam() {
 
               {/* Button */}
               <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 8 }}>
+                  <HelpHint
+                    storageKey="@onboarding_trainer_create_team_button"
+                    title="Antes de crear"
+                    message="Podés cargar avatar opcional y nombre. El código de invitación se crea automáticamente y se puede copiar o compartir."
+                  />
+                </View>
                 <Pressable
                   onPress={onCreate}
                   onPressIn={() => press(0.96)}

@@ -24,6 +24,7 @@ export type WorkoutData = {
   shot_type: string;
   sessions_goal: number;
   target_per_spot: number;
+  targets_by_spot?: Record<string, number> | null;
 };
 
 export type WorkoutSessionDetail = {
@@ -37,29 +38,73 @@ export type WorkoutSessionDetail = {
   spots: { spotKey: string; attempts: number; makes: number; pct: number }[];
 };
 
+export type WorkoutSessionCounts = {
+  total: number;
+  done: number;
+};
+
 export async function createWorkoutSession(params: {
   title: string;
-  shotType: "3PT" | "2PT";
+  shotType: "3PT" | "2PT" | "CUSTOM";
   sessionsGoal: number;
   targetPerSpot: number;
   spotKeys: string[];
+  targetsBySpotKey?: Record<string, number>;
 }) {
-  const { title, shotType, sessionsGoal, targetPerSpot, spotKeys } = params;
+  const { title, shotType, sessionsGoal, targetPerSpot, spotKeys, targetsBySpotKey } = params;
 
-  const { data, error } = await supabase.rpc("create_workout_session", {
+  let data: unknown = null;
+  let error: any = null;
+  let usedLegacyFallback = false;
+
+  // New RPC signature supports p_targets_by_spot, but keep backward compatibility.
+  ({ data, error } = await supabase.rpc("create_workout_session", {
     p_title: title,
     p_shot_type: shotType,
     p_sessions_goal: sessionsGoal,
     p_target_per_spot: targetPerSpot,
     p_spot_keys: spotKeys,
-  });
+    p_targets_by_spot: targetsBySpotKey ?? null,
+  }));
+
+  if (error && targetsBySpotKey) {
+    usedLegacyFallback = true;
+    ({ data, error } = await supabase.rpc("create_workout_session", {
+      p_title: title,
+      p_shot_type: shotType,
+      p_sessions_goal: sessionsGoal,
+      p_target_per_spot: targetPerSpot,
+      p_spot_keys: spotKeys,
+    }));
+  }
 
   if (error) throw error;
 
+  const sessionId = (data as { session_id?: string } | null)?.session_id ?? null;
+  if (usedLegacyFallback && sessionId && targetsBySpotKey && Object.keys(targetsBySpotKey).length > 0) {
+    await updateSessionSpotTargets(sessionId, targetsBySpotKey);
+  }
+
   return {
     workoutId: (data as { workout_id?: string } | null)?.workout_id ?? null,
-    sessionId: (data as { session_id?: string } | null)?.session_id ?? null,
+    sessionId,
   };
+}
+
+export async function updateSessionSpotTargets(
+  sessionId: string,
+  targetsBySpotKey: Record<string, number>,
+): Promise<void> {
+  const entries = Object.entries(targetsBySpotKey);
+  for (const [spotKey, target] of entries) {
+    const safeTarget = Math.max(1, Math.round(target));
+    const { error } = await supabase
+      .from("session_spots")
+      .update({ target_attempts: safeTarget, attempts: safeTarget })
+      .eq("session_id", sessionId)
+      .eq("spot_key", spotKey);
+    if (error) throw error;
+  }
 }
 
 export async function getUserWorkouts(userId: string): Promise<WorkoutRow[]> {
@@ -116,12 +161,48 @@ export async function getWorkoutSessions(workoutId: string): Promise<SessionRow[
 export async function getWorkoutMetadata(workoutId: string): Promise<WorkoutData | null> {
   const { data, error } = await supabase
     .from("workouts")
-    .select("id, title, shot_type, sessions_goal, target_per_spot")
+    .select("id, title, shot_type, sessions_goal, target_per_spot, targets_by_spot")
     .eq("id", workoutId)
     .maybeSingle();
 
   if (error) throw error;
   return (data ?? null) as WorkoutData | null;
+}
+
+export async function getWorkoutSessionCountsByWorkoutIds(
+  workoutIds: string[],
+): Promise<Record<string, WorkoutSessionCounts>> {
+  if (!workoutIds.length) return {};
+
+  const uniqueWorkoutIds = [...new Set(workoutIds)];
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("workout_id, status")
+    .in("workout_id", uniqueWorkoutIds);
+
+  if (error) throw error;
+
+  const counts: Record<string, WorkoutSessionCounts> = {};
+  uniqueWorkoutIds.forEach((id) => {
+    counts[id] = { total: 0, done: 0 };
+  });
+
+  (data ?? []).forEach((row: any) => {
+    const workoutId = row.workout_id as string | null;
+    if (!workoutId) return;
+    if (!counts[workoutId]) counts[workoutId] = { total: 0, done: 0 };
+    counts[workoutId].total += 1;
+    if (row.status === "DONE") counts[workoutId].done += 1;
+  });
+
+  return counts;
+}
+
+export async function applyWorkoutTargetsToSession(sessionId: string, workoutId: string): Promise<void> {
+  const workout = await getWorkoutMetadata(workoutId);
+  const map = (workout?.targets_by_spot ?? null) as Record<string, number> | null;
+  if (!map || typeof map !== "object" || Object.keys(map).length === 0) return;
+  await updateSessionSpotTargets(sessionId, map);
 }
 
 export async function createNextWorkoutSession(workoutId: string): Promise<string> {

@@ -1,11 +1,5 @@
 import { supabase } from "@/src/lib/supabase";
 
-export async function getCurrentUserId() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  return data.user?.id ?? null;
-}
-
 export type SessionSpotRow = {
   id: string;
   session_id: string;
@@ -80,7 +74,15 @@ export async function loadSessionSpots(sessionId: string): Promise<SessionSpotRo
     .order("order_index", { ascending: true });
 
   if (error) throw error;
-  return (data ?? []) as SessionSpotRow[];
+
+  // For mixed workouts, infer shot_type from stable spot key prefix.
+  const inferShotTypeFromSpotKey = (spotKey: string): "2PT" | "3PT" =>
+    spotKey.toLowerCase().startsWith("3pt_") ? "3PT" : "2PT";
+
+  return ((data ?? []) as SessionSpotRow[]).map((row) => ({
+    ...row,
+    shot_type: inferShotTypeFromSpotKey(row.spot_key),
+  }));
 }
 
 export async function markSessionInProgress(sessionId: string, userId?: string) {

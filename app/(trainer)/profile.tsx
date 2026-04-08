@@ -155,9 +155,10 @@ export default function CoachProfile() {
               if (!userId) return;
               await deleteCoachAccount(userId, teamId);
               await deleteOwnAuthUser();
-              await signOut();
-            } catch {
-              Alert.alert("Error", "No se pudo eliminar la cuenta.");
+              // Session can already be invalid after deleting auth user.
+              await signOut().catch(() => {});
+            } catch (e: any) {
+              Alert.alert("Error", e?.message ?? "No se pudo eliminar la cuenta.");
             }
           },
         },
@@ -336,18 +337,21 @@ export default function CoachProfile() {
         )}
 
         {/* Delete account */}
+        <Text style={{ color: "rgba(239,68,68,0.85)", fontSize: 12, textAlign: "center" }}>
+          Cuenta y datos
+        </Text>
         <Pressable
           onPress={onDeleteAccount}
           style={{
             flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
-            height: 48, borderRadius: 16,
-            backgroundColor: "transparent",
-            borderWidth: 1, borderColor: "rgba(239,68,68,0.14)",
+            height: 50, borderRadius: 16,
+            backgroundColor: "rgba(239,68,68,0.12)",
+            borderWidth: 1, borderColor: "rgba(239,68,68,0.45)",
           }}
         >
-          <Ionicons name="trash-outline" size={16} color="rgba(239,68,68,0.40)" />
-          <Text style={{ color: "rgba(239,68,68,0.40)", fontWeight: "700", fontSize: 13 }}>
-            Eliminar cuenta
+          <Ionicons name="trash-outline" size={16} color="rgba(239,68,68,0.95)" />
+          <Text style={{ color: "rgba(239,68,68,0.95)", fontWeight: "800", fontSize: 13 }}>
+            Eliminar cuenta permanentemente
           </Text>
         </Pressable>
 

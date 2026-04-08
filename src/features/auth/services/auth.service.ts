@@ -42,5 +42,13 @@ export async function signOut(): Promise<void> {
 
 export async function deleteOwnAuthUser(): Promise<void> {
   const { error } = await supabase.rpc("delete_own_auth_user");
-  if (error) throw error;
+  if (!error) return;
+
+  if ((error as { code?: string }).code === "42883") {
+    throw new Error(
+      "Falta la función SQL delete_own_auth_user en Supabase. Ejecutá la migración para habilitar eliminación de cuenta."
+    );
+  }
+
+  throw error;
 }

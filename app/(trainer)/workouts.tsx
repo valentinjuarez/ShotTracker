@@ -2,23 +2,28 @@
 import { ALL_SPOTS } from "@/src/data/spots";
 import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import { getCoachSharedWorkouts } from "@/src/features/team/services/team.service";
-import { getWorkoutSessionsDetailed, WorkoutSessionDetail } from "@/src/features/workout/services/workout.service";
+import {
+  getWorkoutSessionCountsByWorkoutIds,
+  getWorkoutSessionsDetailed,
+  WorkoutSessionCounts,
+  WorkoutSessionDetail,
+} from "@/src/features/workout/services/workout.service";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Modal,
-    Pressable,
-    RefreshControl,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    useWindowDimensions,
-    View,
+  ActivityIndicator,
+  Animated,
+  Modal,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
 } from "react-native";
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 
@@ -94,6 +99,7 @@ const card = {
 
 export default function WorkoutsScreen() {
   const [entries, setEntries]       = useState<WorkoutEntry[]>([]);
+  const [sessionCountsMap, setSessionCountsMap] = useState<Record<string, WorkoutSessionCounts>>({});
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch]         = useState("");
@@ -104,6 +110,8 @@ export default function WorkoutsScreen() {
       if (!userId) return;
       const result = await getCoachSharedWorkouts(userId);
       setEntries(result as WorkoutEntry[]);
+      const counts = await getWorkoutSessionCountsByWorkoutIds((result ?? []).map((r: any) => r.workoutId as string));
+      setSessionCountsMap(counts);
     } catch {
       // silent
     } finally {
@@ -204,7 +212,13 @@ export default function WorkoutsScreen() {
           </View>
         ) : (
           Array.from(filteredByPlayer.entries()).map(([playerId, { name, avatarUrl, items }]) => (
-            <PlayerSection key={playerId} playerName={name} playerAvatarUrl={avatarUrl ?? null} workouts={items} />
+            <PlayerSection
+              key={playerId}
+              playerName={name}
+              playerAvatarUrl={avatarUrl ?? null}
+              workouts={items}
+              sessionCountsMap={sessionCountsMap}
+            />
           ))
         )}
       </ScrollView>
@@ -240,10 +254,12 @@ function PlayerSection({
   playerName,
   playerAvatarUrl,
   workouts,
+  sessionCountsMap,
 }: {
   playerName: string;
   playerAvatarUrl?: string | null;
   workouts: WorkoutEntry[];
+  sessionCountsMap: Record<string, WorkoutSessionCounts>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const rotateAnim = useRef(new Animated.Value(0)).current;
@@ -359,7 +375,11 @@ function PlayerSection({
           padding: 12, gap: 10,
         }}>
           {workouts.map((w) => (
-            <WorkoutDetailCard key={w.shareId} entry={w} />
+            <WorkoutDetailCard
+              key={w.shareId}
+              entry={w}
+              precomputedDoneSessions={sessionCountsMap[w.workoutId]?.done ?? 0}
+            />
           ))}
         </View>
       )}
@@ -369,7 +389,7 @@ function PlayerSection({
 
 // ─── Workout detail card ──────────────────────────────────────────────────────
 
-function WorkoutDetailCard({ entry }: { entry: WorkoutEntry }) {
+function WorkoutDetailCard({ entry, precomputedDoneSessions }: { entry: WorkoutEntry; precomputedDoneSessions: number }) {
   const [expanded, setExpanded]       = useState(false);
   const [sessions, setSessions]       = useState<SessionRow[]>([]);
   const [spotAgg, setSpotAgg]         = useState<SpotAgg[]>([]);
@@ -418,7 +438,9 @@ function WorkoutDetailCard({ entry }: { entry: WorkoutEntry }) {
   const totalAtt     = sessions.reduce((a, s) => a + s.attempts, 0);
   const totalMk      = sessions.reduce((a, s) => a + s.makes,    0);
   const overallPct   = totalAtt > 0 ? totalMk / totalAtt : null;
-  const sessCompleted = sessions.filter((s) => s.status === "DONE").length;
+  const sessCompleted = sessions.length > 0
+    ? sessions.filter((s) => s.status === "DONE").length
+    : precomputedDoneSessions;
   const chevronRotate = rotateAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
 
   return (
@@ -461,7 +483,7 @@ function WorkoutDetailCard({ entry }: { entry: WorkoutEntry }) {
         </View>
         <SessionProgressBar
           sessionsGoal={entry.sessionsGoal}
-          sessCompleted={expanded ? sessCompleted : null}
+          sessCompleted={sessCompleted}
         />
       </Pressable>
 

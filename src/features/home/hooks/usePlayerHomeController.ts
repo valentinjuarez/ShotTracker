@@ -4,19 +4,20 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 
 import {
-  getCurrentUserId,
-  getCurrentUserMetadata,
-  signOut,
+    getCurrentUserId,
+    getCurrentUserMetadata,
+    signOut,
 } from "@/src/features/auth/services/auth.service";
 import { getCurrentUserProfile } from "@/src/features/profile/services/profile.service";
 import {
-  getSessionAttemptsBySession,
-  getSessionHistory,
-  type SessionRow,
+    getSessionAttemptsBySession,
+    getSessionHistory,
+    type SessionRow,
 } from "@/src/features/session/services/session.service";
 import {
-  createNextWorkoutSession,
-  getLatestWorkoutProgress,
+    applyWorkoutTargetsToSession,
+    createNextWorkoutSession,
+    getLatestWorkoutProgress,
 } from "@/src/features/workout/services/workout.service";
 import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 
@@ -150,6 +151,7 @@ export function usePlayerHomeController() {
     try {
       setStartingSession(true);
       const newSessionId = await createNextWorkoutSession(inProgressWorkout.id);
+      await applyWorkoutTargetsToSession(newSessionId, inProgressWorkout.id);
       router.push({
         pathname: "/(tabs)/session/run",
         params: { sessionId: newSessionId, workoutId: inProgressWorkout.id },

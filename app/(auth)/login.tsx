@@ -4,15 +4,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-    Animated,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  Animated,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 // ─── Animated input field ─────────────────────────────────────────────────────
@@ -225,18 +226,16 @@ export default function Login() {
           {/* Logo */}
           <Animated.View style={{ alignItems: "center", marginBottom: 40, opacity: anims.logo, transform: [{ scale: Animated.multiply(logoScale, pulseAnim) }] }}>
             <View style={{
-              width: 84, height: 84, borderRadius: 28,
+              width: 100, height: 100, borderRadius: 24,
               backgroundColor: "rgba(245,158,11,0.12)",
               borderWidth: 1.5, borderColor: "rgba(245,158,11,0.32)",
               alignItems: "center", justifyContent: "center",
               shadowColor: "#F59E0B", shadowOpacity: 0.40, shadowRadius: 28, shadowOffset: { width: 0, height: 4 },
               elevation: 14,
+              overflow: "hidden",
             }}>
-              <Ionicons name="basketball" size={40} color="#F59E0B" />
+              <Image source={require('@/assets/images/logoLogin.png')} style={{ width: "100%", height: "100%", resizeMode: 'cover' }} />
             </View>
-            <Text style={{ color: "rgba(245,158,11,0.70)", fontWeight: "900", fontSize: 13, letterSpacing: 3, marginTop: 10, textTransform: "uppercase" }}>
-              ShotTracker
-            </Text>
           </Animated.View>
 
           {/* Title */}

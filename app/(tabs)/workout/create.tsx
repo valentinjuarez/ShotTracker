@@ -1,29 +1,30 @@
 // app/workout/create.tsx
-import { DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
+import { ALL_SPOTS, DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import { Court } from "@/src/features/session/components/Court";
-import { getCurrentUserId } from "@/src/features/session/services/session.service";
 import { createWorkoutSession } from "@/src/features/workout/services/workout.service";
 import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
+import { HelpHint } from "@/src/shared/components/ui/HelpHint";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
-    useWindowDimensions,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
 } from "react-native";
 
-type PlanTipo = "3PT" | "2PT";
+type PlanTipo = "3PT" | "2PT" | "CUSTOM";
 
 // ─── Animated entrance hook ───────────────────────────────────────────────────
 function useFadeSlide(delay = 0) {
@@ -34,7 +35,7 @@ function useFadeSlide(delay = 0) {
       useNativeDriver: true,
       damping: 14, stiffness: 100,
     }).start();
-  }, []);
+  }, [anim, delay]);
   return {
     opacity: anim,
     transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
@@ -59,12 +60,13 @@ export default function CreateWorkout() {
   const isSmall   = width < 360;
 
   const courtW = Math.min(width - (isSmall ? 32 : 40), 420);
-  const courtH = Math.round(courtW * 1.2);
+  const courtH = Math.round(courtW * 1.08);
 
   const [name, setName]               = useState("Planilla de tiro");
   const [tipo, setTipo]               = useState<PlanTipo>("3PT");
   const [sessionsGoal, setSessionsGoal] = useState(14);
   const [defaultTarget, setDefaultTarget] = useState(10);
+  const [spotTargetsById, setSpotTargetsById] = useState<Record<string, number>>({});
   const [nameFocused, setNameFocused] = useState(false);
   const [saving, setSaving]           = useState(false);
   const { isOnline } = useNetworkStatus();
@@ -74,31 +76,53 @@ export default function CreateWorkout() {
   const sessAnim   = useCounterAnim();
   const tgtAnim    = useCounterAnim();
 
-  const spots = useMemo(
-    () => (tipo === "3PT" ? TRIPLE_SPOTS : DOBLE_SPOTS),
-    [tipo]
-  );
-
+  const spots = useMemo(() => {
+    if (tipo === "3PT") return TRIPLE_SPOTS;
+    if (tipo === "2PT") return DOBLE_SPOTS;
+    return ALL_SPOTS;
+  }, [tipo]);
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(TRIPLE_SPOTS.map((s) => s.id))
   );
+  const allowedSpotIds = useMemo(() => new Set(spots.map((s) => s.id)), [spots]);
+  const selectedInScope = useMemo(
+    () => new Set([...selected].filter((id) => allowedSpotIds.has(id))),
+    [selected, allowedSpotIds]
+  );
+  const selectedSpotsInScope = useMemo(
+    () => spots.filter((s) => selectedInScope.has(s.id)),
+    [spots, selectedInScope],
+  );
+
+  function targetForSpot(spotId: string) {
+    return Math.max(1, spotTargetsById[spotId] ?? defaultTarget);
+  }
 
   const syncSelection = (newTipo: PlanTipo) => {
+    if (newTipo === "CUSTOM") {
+      setSelected((prev) => new Set(prev));
+      return;
+    }
     const newSpots = newTipo === "3PT" ? TRIPLE_SPOTS : DOBLE_SPOTS;
     setSelected(new Set(newSpots.map((s) => s.id)));
   };
 
   function toggleSpot(id: string) {
+    if (!allowedSpotIds.has(id)) return;
     Haptics.selectionAsync();
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+        setSpotTargetsById((curr) => (curr[id] ? curr : { ...curr, [id]: defaultTarget }));
+      }
       return next;
     });
   }
 
-  const selectedCount = selected.size;
+  const selectedCount = selectedInScope.size;
   const totalSpots    = spots.length;
 
   const canCreate =
@@ -109,8 +133,45 @@ export default function CreateWorkout() {
 
   function setAll(on: boolean) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (on) setSelected(new Set(spots.map((s) => s.id)));
-    else setSelected(new Set());
+    if (on) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        spots.forEach((s) => next.add(s.id));
+        return next;
+      });
+      setSpotTargetsById((prev) => {
+        const next = { ...prev };
+        spots.forEach((s) => {
+          if (!next[s.id]) next[s.id] = defaultTarget;
+        });
+        return next;
+      });
+    } else {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        spots.forEach((s) => next.delete(s.id));
+        return next;
+      });
+    }
+  }
+
+  function changeSpotTarget(spotId: string, delta: number) {
+    Haptics.selectionAsync();
+    setSpotTargetsById((prev) => {
+      const current = Math.max(1, prev[spotId] ?? defaultTarget);
+      return { ...prev, [spotId]: Math.max(1, current + delta) };
+    });
+  }
+
+  function setSpotTargetFromInput(spotId: string, text: string) {
+    const digits = text.replace(/\D/g, "");
+    if (!digits) {
+      setSpotTargetsById((prev) => ({ ...prev, [spotId]: 1 }));
+      return;
+    }
+    const parsed = Number(digits);
+    const safe = Number.isFinite(parsed) ? Math.max(1, Math.min(999, parsed)) : 1;
+    setSpotTargetsById((prev) => ({ ...prev, [spotId]: safe }));
   }
 
   function pressBtn(v: number) {
@@ -134,15 +195,24 @@ export default function CreateWorkout() {
       if (!userId) throw new Error("No autenticado");
 
       const orderedSpotKeys = spots
-        .filter((s) => selected.has(s.id))
+        .filter((s) => selectedInScope.has(s.id))
         .map((s) => s.id);
+
+      const customTargets =
+        tipo === "CUSTOM"
+          ? Object.fromEntries(selectedSpotsInScope.map((s) => [s.id, targetForSpot(s.id)]))
+          : undefined;
+
+      const shotTypeForCreate: "3PT" | "2PT" | "CUSTOM" =
+        tipo === "CUSTOM" ? "CUSTOM" : tipo;
 
       const { workoutId, sessionId } = await createWorkoutSession({
         title: name.trim(),
-        shotType: tipo,
+        shotType: shotTypeForCreate,
         sessionsGoal,
         targetPerSpot: defaultTarget,
         spotKeys: orderedSpotKeys,
+        targetsBySpotKey: customTargets,
       });
 
       if (!workoutId || !sessionId) throw new Error("No se pudo crear la planilla.");
@@ -167,6 +237,7 @@ export default function CreateWorkout() {
     setTipo("3PT");
     setSessionsGoal(14);
     setDefaultTarget(10);
+    setSpotTargetsById({});
     setSelected(new Set(TRIPLE_SPOTS.map((s) => s.id)));
     setSaving(false);
   }, []);
@@ -211,9 +282,16 @@ export default function CreateWorkout() {
       >
         {/* Header */}
         <Animated.View style={[{ gap: 4 }, a0]}>
-          <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 12, fontWeight: "600", letterSpacing: 0.3 }}>
-            Nueva planilla
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 12, fontWeight: "600", letterSpacing: 0.3 }}>
+              Nueva planilla
+            </Text>
+            <HelpHint
+              storageKey="@onboarding_workout_create_header"
+              title="¿Qué es una planilla?"
+              message="Es un plan con varias sesiones. Definís tipo de tiro, spots, intentos y objetivo para seguir avances en el tiempo."
+            />
+          </View>
           <Text style={{ color: "white", fontSize: 24, fontWeight: "900", letterSpacing: -0.5 }}>
             Crear planilla 🏀
           </Text>
@@ -267,6 +345,7 @@ export default function CreateWorkout() {
               {([
                 { value: "3PT" as PlanTipo, label: "Triples", icon: "basketball",         sub: "15 posiciones" },
                 { value: "2PT" as PlanTipo, label: "Dobles",  icon: "basketball-outline", sub: "Incluye TL"    },
+                { value: "CUSTOM" as PlanTipo, label: "Personalizada", icon: "options-outline", sub: "Elegí tus spots" },
               ] as const).map((opt) => {
                 const on = tipo === opt.value;
                 return (
@@ -339,7 +418,15 @@ export default function CreateWorkout() {
         <Animated.View style={a4}>
           <SectionCard>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <SectionHeader icon="map-outline" title="Posiciones" />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <SectionHeader icon="map-outline" title="Posiciones" />
+                <HelpHint
+                  storageKey="@onboarding_workout_create_spots"
+                  title="Selección de posiciones"
+                  message="Tocá los spots en la cancha para incluirlos. Cuantas más posiciones selecciones, más variado será tu entrenamiento."
+                  align="left"
+                />
+              </View>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <MiniChip label="Todas"   onPress={() => setAll(true)}  />
                 <MiniChip label="Ninguna" onPress={() => setAll(false)} dim />
@@ -373,13 +460,82 @@ export default function CreateWorkout() {
               <Court
                 width={courtW}
                 height={courtH}
-                spots={spots}
-                selectedIds={selected}
+                spots={ALL_SPOTS}
+                selectedIds={selectedInScope}
                 onToggleSpot={toggleSpot}
+                snapToNearest
+                hitRadius={46}
               />
             </View>
           </SectionCard>
         </Animated.View>
+
+        {tipo === "CUSTOM" && selectedSpotsInScope.length > 0 && (
+          <Animated.View style={a5}>
+            <SectionCard>
+              <SectionHeader icon="options-outline" title="Intentos por spot" />
+              <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 12, marginTop: 8, marginBottom: 10 }}>
+                Ajustá cada posición individualmente. Ej: TL con más volumen.
+              </Text>
+              <View style={{ gap: 8 }}>
+                {selectedSpotsInScope.map((spot) => {
+                  const target = targetForSpot(spot.id);
+                  const typeLabel = spot.shotType === "3PT" ? "Triple" : "Doble";
+                  return (
+                    <View
+                      key={spot.id}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingVertical: 9,
+                        paddingHorizontal: 10,
+                        borderRadius: 12,
+                        backgroundColor: "rgba(255,255,255,0.05)",
+                        borderWidth: 1,
+                        borderColor: "rgba(255,255,255,0.09)",
+                      }}
+                    >
+                      <View>
+                        <Text style={{ color: "white", fontWeight: "800", fontSize: 13 }}>
+                          {typeLabel} {spot.label}
+                        </Text>
+                        <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 11 }}>
+                          {spot.id}
+                        </Text>
+                      </View>
+
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <MiniCounterBtn label="−" onPress={() => changeSpotTarget(spot.id, -1)} />
+                        <TextInput
+                          value={String(target)}
+                          onChangeText={(t) => setSpotTargetFromInput(spot.id, t)}
+                          keyboardType="number-pad"
+                          maxLength={3}
+                          style={{
+                            minWidth: 54,
+                            height: 34,
+                            borderRadius: 10,
+                            backgroundColor: "rgba(255,255,255,0.08)",
+                            borderWidth: 1,
+                            borderColor: "rgba(255,255,255,0.14)",
+                            color: "white",
+                            fontWeight: "900",
+                            fontSize: 15,
+                            textAlign: "center",
+                            paddingVertical: 0,
+                            paddingHorizontal: 8,
+                          }}
+                        />
+                        <MiniCounterBtn label="+" onPress={() => changeSpotTarget(spot.id, +1)} />
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </SectionCard>
+          </Animated.View>
+        )}
 
         {/* Summary chips */}
         <Animated.View style={[{
@@ -393,10 +549,10 @@ export default function CreateWorkout() {
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {[
               { icon: "clipboard-outline",  label: name.trim() || "Sin nombre", accent: name.trim().length > 0 },
-              { icon: "basketball-outline", label: tipo === "3PT" ? "Triples" : "Dobles", accent: true },
+              { icon: "basketball-outline", label: tipo === "3PT" ? "Triples" : tipo === "2PT" ? "Dobles" : "Personalizada", accent: true },
               { icon: "map-outline",        label: `${selectedCount} posiciones`, accent: selectedCount > 0 },
               { icon: "calendar-outline",   label: `${sessionsGoal} sesiones`, accent: true },
-              { icon: "repeat-outline",     label: `${defaultTarget} intentos`, accent: true },
+              { icon: "repeat-outline",     label: tipo === "CUSTOM" ? "Intentos personalizados" : `${defaultTarget} intentos`, accent: true },
             ].map((item) => (
               <View key={item.label} style={{
                 flexDirection: "row", alignItems: "center", gap: 5,
@@ -416,6 +572,13 @@ export default function CreateWorkout() {
 
         {/* Create button */}
         <Animated.View style={[a5, { transform: [...(a5.transform as any[]), { scale: btnScale }] }]}>
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 8 }}>
+            <HelpHint
+              storageKey="@onboarding_workout_create_button"
+              title="Crear planilla"
+              message="Al crearla, se genera automáticamente la primera sesión para empezar de inmediato y guardar progreso por spot."
+            />
+          </View>
           <Pressable
             disabled={!canCreate || saving}
             onPress={onCreateWorkout}
@@ -455,6 +618,26 @@ export default function CreateWorkout() {
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function MiniCounterBtn({ label, onPress }: { label: "−" | "+"; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        width: 30,
+        height: 30,
+        borderRadius: 9,
+        backgroundColor: "rgba(255,255,255,0.08)",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.12)",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ color: "white", fontWeight: "900", fontSize: 18, lineHeight: 20 }}>{label}</Text>
+    </Pressable>
   );
 }
 

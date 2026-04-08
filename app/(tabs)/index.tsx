@@ -1,20 +1,21 @@
 ﻿// app/(tabs)/index.tsx
 import { usePlayerHomeController } from "@/src/features/home/hooks/usePlayerHomeController";
+import { HelpHint } from "@/src/shared/components/ui/HelpHint";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { Link, useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Animated,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    View,
+    useWindowDimensions,
 } from "react-native";
 
 //  Shared styles 
@@ -136,6 +137,13 @@ export default function Home() {
         </Animated.View>
 
         {/*  Quick actions  */}
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: -8 }}>
+          <HelpHint
+            storageKey="@onboarding_home_quick_actions"
+            title="¿Para qué sirven?"
+            message="Nueva sesión inicia un entrenamiento libre. Crear planilla arma un plan de varias sesiones para seguir progreso."
+          />
+        </View>
         <Animated.View style={[{ flexDirection: "row", gap: 12 }, heroAnim]}>
           <Link href="/session/create" asChild>
             <Pressable
@@ -313,7 +321,15 @@ export default function Home() {
         {/*  Planilla activa  */}
         <Animated.View style={[card, workoutAnim]}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <Text style={{ color: "white", fontWeight: "900", fontSize: 15, letterSpacing: -0.2 }}>Planilla activa</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={{ color: "white", fontWeight: "900", fontSize: 15, letterSpacing: -0.2 }}>Planilla activa</Text>
+              <HelpHint
+                storageKey="@onboarding_home_active_workout"
+                title="Planilla activa"
+                message="Acá ves tu plan actual. Si está en progreso, podés continuar la próxima sesión desde este bloque."
+                align="left"
+              />
+            </View>
             <PillBtn onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.push("/(tabs)/workout/" as any);

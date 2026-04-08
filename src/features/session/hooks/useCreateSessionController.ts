@@ -6,9 +6,9 @@ import { useRouter } from "expo-router";
 import { Alert } from "react-native";
 
 import { ALL_SPOTS, DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
+import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import {
     createSessionWithSpots,
-    getCurrentUserId,
 } from "@/src/features/session/services/session.service";
 import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
 import { generateUUID, saveLocalSession } from "@/src/utils/localStore";

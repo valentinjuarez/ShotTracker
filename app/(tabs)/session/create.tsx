@@ -2,19 +2,21 @@
 import { ALL_SPOTS, DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
 import { Court } from "@/src/features/session/components/Court";
 import { useCreateSessionController } from "@/src/features/session/hooks/useCreateSessionController";
+import { HelpHint } from "@/src/shared/components/ui/HelpHint";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Modal,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    View,
-    useWindowDimensions,
+  ActivityIndicator,
+  Animated,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
 } from "react-native";
 
 //  Animation hooks 
@@ -86,9 +88,16 @@ export default function CreateSession() {
       >
         {/*  Title  */}
         <Animated.View style={titleAnim}>
-          <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, letterSpacing: 1.4, textTransform: "uppercase" }}>
-            Nueva sesión
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, letterSpacing: 1.4, textTransform: "uppercase" }}>
+              Nueva sesión
+            </Text>
+            <HelpHint
+              storageKey="@onboarding_session_create_mode"
+              title="Elegí un modo"
+              message="Triples y dobles te arman selección rápida. En Libre podés tocar spots manualmente para personalizar la sesión."
+            />
+          </View>
           <Text style={{ color: "white", fontSize: 24, fontWeight: "900", letterSpacing: -0.5, marginTop: 2 }}>
             Elegí tu modo
           </Text>
@@ -296,18 +305,41 @@ export default function CreateSession() {
                 setDefaultTarget((v) => Math.max(1, v - 1));
               }}
             />
-            <Text style={{
-              color: "white", fontWeight: "900", fontSize: 22,
-              minWidth: 44, textAlign: "center",
-            }}>
-              {defaultTarget}
-            </Text>
+            <TextInput
+              value={String(defaultTarget)}
+              onChangeText={(t) => {
+                const digits = t.replace(/\D/g, "");
+                if (!digits) {
+                  setDefaultTarget(1);
+                  return;
+                }
+                const parsed = Number(digits);
+                const safe = Number.isFinite(parsed) ? Math.max(1, Math.min(100, parsed)) : 1;
+                setDefaultTarget(safe);
+              }}
+              keyboardType="number-pad"
+              maxLength={3}
+              style={{
+                minWidth: 60,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: "rgba(255,255,255,0.08)",
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.14)",
+                color: "white",
+                fontWeight: "900",
+                fontSize: 20,
+                textAlign: "center",
+                paddingHorizontal: 8,
+                paddingVertical: 0,
+              }}
+            />
             <StepperBtn
               icon="add"
-              disabled={defaultTarget >= 50}
+              disabled={defaultTarget >= 100}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setDefaultTarget((v) => Math.min(50, v + 1));
+                setDefaultTarget((v) => Math.min(100, v + 1));
               }}
             />
           </View>
@@ -315,6 +347,13 @@ export default function CreateSession() {
 
         {/*  Footer  */}
         <Animated.View style={[footerAnim, { gap: 10 }]}>
+          <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+            <HelpHint
+              storageKey="@onboarding_session_create_start"
+              title="Empezar sesión"
+              message="El botón se activa cuando hay al menos una posición elegida. El objetivo por spot define cuántos tiros vas a registrar por zona."
+            />
+          </View>
           <StartBtn disabled={!canContinue} saving={saving} onPress={createSessionAndGo} />
 
           {!saving && selectedCount === 0 && (
@@ -369,6 +408,8 @@ export default function CreateSession() {
                 selectedIds={selected}
                 onToggleSpot={saving ? () => {} : toggleSpot}
                 highlightedSpotId={currentSpot.id}
+                snapToNearest
+                hitRadius={46}
               />
             </ScrollView>
 

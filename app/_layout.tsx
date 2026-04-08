@@ -1,5 +1,7 @@
 import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
 import { queryClient } from "@/src/lib/queryClient";
+import "@/src/lib/sentry";
+import { Sentry } from "@/src/lib/sentry";
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -9,7 +11,7 @@ import { Stack, usePathname } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Text, View } from "react-native";
 
-export default function RootLayout() {
+export default Sentry.wrap(function RootLayout() {
   const [session, setSession]     = useState<Session | null>(null);
   const [ready, setReady]         = useState(false);
   const [roleReady, setRoleReady] = useState(false);
@@ -74,7 +76,7 @@ export default function RootLayout() {
       )}
     </QueryClientProvider>
   );
-}
+});
 
 function OfflineBanner() {
   const { isOnline } = useNetworkStatus();
@@ -139,6 +141,18 @@ function AuthGate({ session, onRoleReady }: { session: Session | null; onRoleRea
   const pathname  = usePathname();
   const [role, setRole] = useState2<"player" | "coach" | null>(null);
   const [roleReady, setRoleReady] = useState2(false);
+
+  useEffect2(() => {
+    if (!session) {
+      Sentry.setUser(null);
+      return;
+    }
+
+    Sentry.setUser({
+      id: session.user.id,
+      email: session.user.email,
+    });
+  }, [session]);
 
   // Fetch role whenever session changes
   useEffect2(() => {

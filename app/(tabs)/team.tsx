@@ -1,33 +1,34 @@
 // app/(tabs)/team.tsx
 import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import {
-  getSharedTeamWorkouts,
-  getTeamMembers,
-  getUserTeam,
-  joinTeamByCode,
-  leaveTeam as leaveTeamMembership,
-  shareWorkoutWithTeam,
-  unshareWorkoutWithTeam,
+    getSharedTeamWorkouts,
+    getTeamMembers,
+    getUserTeam,
+    joinTeamByCode,
+    leaveTeam as leaveTeamMembership,
+    shareWorkoutWithTeam,
+    unshareWorkoutWithTeam,
 } from "@/src/features/team/services/team.service";
 import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
+import { HelpHint } from "@/src/shared/components/ui/HelpHint";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -340,9 +341,16 @@ function JoinCard({
   return (
     <View style={[card, { gap: 16 }]}>
       <View style={{ gap: 4 }}>
-        <Text style={{ color: "white", fontWeight: "900", fontSize: 16, letterSpacing: -0.2 }}>
-          Unirse con código
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={{ color: "white", fontWeight: "900", fontSize: 16, letterSpacing: -0.2 }}>
+            Unirse con código
+          </Text>
+          <HelpHint
+            storageKey="@onboarding_team_join_code"
+            title="Cómo unirse"
+            message="Pedile el código a tu entrenador, ingresalo acá y quedás vinculada al equipo para compartir planillas y stats."
+          />
+        </View>
         <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 13 }}>
           Pedí el código a tu entrenador/a e ingresalo acá.
         </Text>
