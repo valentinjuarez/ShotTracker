@@ -22,7 +22,7 @@ export default function Confirm() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 380, useNativeDriver: true }).start();
-  }, []);
+  }, [fadeAnim]);
 
   useEffect(() => {
     async function verify() {

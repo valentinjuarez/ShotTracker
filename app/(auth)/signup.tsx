@@ -3,15 +3,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-    Animated,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 type UserRole = "player" | "coach";
@@ -48,7 +48,7 @@ function Field({
 
   useEffect(() => {
     Animated.timing(focusAnim, { toValue: focused ? 1 : 0, duration: 200, useNativeDriver: false }).start();
-  }, [focused]);
+  }, [focusAnim, focused]);
 
   useEffect(() => {
     if (error && error !== prevError.current) {
@@ -61,7 +61,7 @@ function Field({
       ]).start();
     }
     prevError.current = error;
-  }, [error]);
+  }, [error, shakeAnim]);
 
   const borderColor = focusAnim.interpolate({
     inputRange:  [0, 1],
@@ -287,7 +287,7 @@ export default function Signup() {
       Animated.spring(anims.btn,  { toValue: 1, useNativeDriver: true, damping: 14, stiffness: 100 }),
       Animated.spring(anims.link, { toValue: 1, useNativeDriver: true, damping: 14, stiffness: 100 }),
     ]).start();
-  }, []);
+  }, [anims.btn, anims.f1, anims.f2, anims.f3, anims.f4, anims.link, anims.logo, anims.role, anims.str]);
 
   const usernameError = useMemo(() => {
     if (!username) return null;

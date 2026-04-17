@@ -10,6 +10,7 @@ import {
     WorkoutRow,
     WorkoutSessionCounts,
 } from "@/src/features/workout/services/workout.service";
+import { useAutoRefreshOnFocus } from "@/src/hooks/useAutoRefreshOnFocus";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -97,8 +98,9 @@ export default function WorkoutHistory() {
     await loadData(true);
   }, [loadData]);
 
-  async function loadSessions(workoutId: string) {
-    if (sessionsMap[workoutId] || loadingSess[workoutId]) return;
+  async function loadSessions(workoutId: string, force = false) {
+    if (loadingSess[workoutId]) return;
+    if (!force && sessionsMap[workoutId]) return;
     try {
       setLoadingSess((p) => ({ ...p, [workoutId]: true }));
       const sessionsWithPct = await getWorkoutSessions(workoutId);
@@ -112,8 +114,35 @@ export default function WorkoutHistory() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const next = !expanded[workoutId];
     setExpanded((p) => ({ ...p, [workoutId]: next }));
-    if (next) loadSessions(workoutId);
+    if (next) loadSessions(workoutId, true);
   }
+
+  const refreshOnFocus = useCallback(async () => {
+    await loadData(true);
+
+    const expandedWorkoutIds = Object.entries(expanded)
+      .filter(([, isOpen]) => isOpen)
+      .map(([workoutId]) => workoutId);
+
+    if (!expandedWorkoutIds.length) return;
+
+    const refreshed = await Promise.all(
+      expandedWorkoutIds.map(async (workoutId) => {
+        const sessions = await getWorkoutSessions(workoutId);
+        return [workoutId, sessions] as const;
+      })
+    );
+
+    setSessionsMap((prev) => {
+      const next = { ...prev };
+      refreshed.forEach(([workoutId, sessions]) => {
+        next[workoutId] = sessions;
+      });
+      return next;
+    });
+  }, [expanded, loadData]);
+
+  useAutoRefreshOnFocus(refreshOnFocus, { intervalMs: 30000 });
 
   function onDeleteWorkout(workoutId: string) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

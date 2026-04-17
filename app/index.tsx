@@ -1,17 +1,18 @@
 import { supabase } from "@/src/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
+import type { Session } from "@supabase/supabase-js";
 import * as Linking from "expo-linking";
 import { Link, useRouter } from "expo-router";
 import { useEffect, useMemo } from "react";
 import {
-    Animated,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    View,
-    useWindowDimensions,
+  Animated,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  View,
+  useWindowDimensions,
 } from "react-native";
 
 const SUPPORT_EMAIL = "shottracker.app@gmail.com";
@@ -50,7 +51,7 @@ export default function Landing() {
 
     let active = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
       if (!active) return;
       router.replace(data.session ? "/(tabs)" : "/(auth)/login");
     });

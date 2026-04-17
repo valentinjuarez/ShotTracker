@@ -4,16 +4,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Animated,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
+    Animated,
+    Image,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 
 // ─── Animated input field ─────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ function Field({
 
   useEffect(() => {
     Animated.timing(focusAnim, { toValue: focused ? 1 : 0, duration: 200, useNativeDriver: false }).start();
-  }, [focused]);
+  }, [focusAnim, focused]);
 
   useEffect(() => {
     if (error && error !== prevError.current) {
@@ -56,7 +56,7 @@ function Field({
       ]).start();
     }
     prevError.current = error;
-  }, [error]);
+  }, [error, shakeAnim]);
 
   const borderColor = focusAnim.interpolate({
     inputRange:  [0, 1],
@@ -172,7 +172,7 @@ export default function Login() {
 
     entrance.start(() => pulse.start());
     return () => { entrance.stop(); pulse.stop(); };
-  }, []);
+  }, [anims.btn, anims.f1, anims.f2, anims.link, anims.logo, anims.title, pulseAnim]);
 
   const emailError = useMemo(() => {
     if (!email) return null;

@@ -4,15 +4,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
 import {
-    Animated,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 export default function ForgotPassword() {
@@ -25,7 +25,7 @@ export default function ForgotPassword() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 380, useNativeDriver: true }).start();
-  }, []);
+  }, [fadeAnim]);
 
   const emailError = useMemo(() => {
     if (!email) return null;
@@ -37,7 +37,7 @@ export default function ForgotPassword() {
   const focusAnim = useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
     Animated.timing(focusAnim, { toValue: focused ? 1 : 0, duration: 180, useNativeDriver: false }).start();
-  }, [focused]);
+  }, [focusAnim, focused]);
   const borderColor = focusAnim.interpolate({
     inputRange:  [0, 1],
     outputRange: [

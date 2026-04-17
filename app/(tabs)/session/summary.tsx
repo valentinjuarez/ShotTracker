@@ -3,9 +3,11 @@ import { ALL_SPOTS } from "@/src/data/spots";
 import { getCurrentUserMetadata } from "@/src/features/auth/services/auth.service";
 import { useSessionSummaryController } from "@/src/features/session/hooks/useSessionSummaryController";
 import {
-    getSessionSpotsForPdf,
-    getWorkoutSessionsForPdf,
+  getSessionSpotsForPdf,
+  getWorkoutSessionsForPdf,
+  type SessionSpotRow,
 } from "@/src/features/session/services/session.service";
+import { type WorkoutData } from "@/src/features/workout/services/workout.service";
 import { Ionicons } from "@expo/vector-icons";
 import { File } from "expo-file-system/next";
 import * as Haptics from "expo-haptics";
@@ -14,16 +16,16 @@ import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useEffect, useRef } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Pressable,
-    RefreshControl,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    useWindowDimensions,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
 } from "react-native";
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 
@@ -57,7 +59,7 @@ function useFadeSlide(delay = 0) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: 1, duration: 420, delay, useNativeDriver: true }).start();
-  }, []);
+  }, [anim, delay]);
   return {
     opacity: anim,
     transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }) }],
@@ -68,7 +70,7 @@ function useCountUp(target: number, delay = 0) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: target, duration: 900, delay, useNativeDriver: false }).start();
-  }, [target]);
+  }, [anim, delay, target]);
   return anim;
 }
 
@@ -84,7 +86,7 @@ function usePulse(active = true) {
     );
     loop.start();
     return () => loop.stop();
-  }, [active]);
+  }, [active, anim]);
   return anim;
 }
 
@@ -948,7 +950,7 @@ function AnimatedBar({ value, color }: { value: number; color: string }) {
   useEffect(() => {
     anim.setValue(0);
     Animated.spring(anim, { toValue: value, useNativeDriver: false, speed: 3, bounciness: 5 }).start();
-  }, [value]);
+  }, [anim, value]);
   return (
     <View style={{
       height: 13, borderRadius: 999, overflow: "hidden",

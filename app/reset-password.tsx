@@ -9,23 +9,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    Animated,
-    KeyboardAvoidingView,
-    Linking,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  Animated,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 function useInputAnim(focused: boolean, hasError: boolean) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: focused ? 1 : 0, duration: 180, useNativeDriver: false }).start();
-  }, [focused]);
+  }, [anim, focused]);
   const borderColor = anim.interpolate({
     inputRange: [0, 1],
     outputRange: [
@@ -60,7 +60,7 @@ export default function ResetPassword() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 380, useNativeDriver: true }).start();
-  }, []);
+  }, [fadeAnim]);
 
   // Step 1: exchange the PKCE code for a session.
   // With flowType:"pkce", Supabase redirects to shottracker://reset-password?code=XXX
@@ -101,7 +101,7 @@ export default function ResetPassword() {
 
       // Give it 10 s then give up
       setTimeout(() => {
-        if (!cancelled && exchanging) {
+        if (!cancelled) {
           setExchangeError("El enlace es inválido o ya fue usado. Solicitá uno nuevo.");
           setExchanging(false);
         }
