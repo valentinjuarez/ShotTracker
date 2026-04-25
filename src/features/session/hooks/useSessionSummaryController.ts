@@ -13,9 +13,8 @@ import {
 } from "@/src/features/session/services/session.service";
 import { getUserTeam, isWorkoutSharedWithTeam, shareWorkoutWithTeam } from "@/src/features/team/services/team.service";
 import {
-    applyWorkoutTargetsToSession,
-    createNextWorkoutSession,
     getWorkoutMetadata,
+    getWorkoutSessions,
     type WorkoutData,
 } from "@/src/features/workout/services/workout.service";
 
@@ -30,7 +29,7 @@ export function useSessionSummaryController() {
   const [selectedSpotKey, setSelectedSpotKey] = useState<string | null>(null);
   const [workout, setWorkout] = useState<WorkoutData | null>(null);
   const [completedSessions, setCompletedSessions] = useState(0);
-  const [savingNext, setSavingNext] = useState(false);
+  const [nextSummarySession, setNextSummarySession] = useState<{ id: string; sessionNumber: number } | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
 
@@ -78,41 +77,37 @@ export function useSessionSummaryController() {
     if (!workoutId) {
       setWorkout(null);
       setCompletedSessions(0);
+      setNextSummarySession(null);
       return;
     }
 
     (async () => {
-      const [workoutData, sessionNumber] = await Promise.all([
+      const [workoutData, sessionNumber, workoutSessions] = await Promise.all([
         getWorkoutMetadata(workoutId),
         sessionId ? getSessionNumber(sessionId) : Promise.resolve(0),
+        getWorkoutSessions(workoutId),
       ]);
 
       if (workoutData) setWorkout(workoutData);
       setCompletedSessions(sessionNumber);
+
+      const nextDone = workoutSessions.find(
+        (session) => session.session_number > sessionNumber && session.status === "DONE",
+      );
+      setNextSummarySession(
+        nextDone ? { id: nextDone.id, sessionNumber: nextDone.session_number } : null,
+      );
     })();
   }, [sessionId, workoutId]);
 
-  const createNextSession = useCallback(async () => {
-    if (!workoutId || !workout) return;
-
-    try {
-      setSavingNext(true);
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const nextSessionId = await createNextWorkoutSession(workoutId);
-      await applyWorkoutTargetsToSession(nextSessionId, workoutId);
-
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace({
-        pathname: "/session/run",
-        params: { sessionId: nextSessionId, workoutId },
-      });
-    } catch (e: any) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Error", e?.message ?? "No se pudo iniciar la siguiente sesion.");
-    } finally {
-      setSavingNext(false);
-    }
-  }, [router, workout, workoutId]);
+  const goToNextSummary = useCallback(async () => {
+    if (!workoutId || !nextSummarySession) return;
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.replace({
+      pathname: "/session/summary",
+      params: { sessionId: nextSummarySession.id, workoutId },
+    });
+  }, [nextSummarySession, router, workoutId]);
 
   const handleShareTeam = useCallback(async () => {
     if (!workout) return;
@@ -202,16 +197,16 @@ export function useSessionSummaryController() {
 
   return {
     completedSessions,
-    createNextSession,
+    goToNextSummary,
     handleShareTeam,
     loadData,
     loading,
     mode,
+    nextSummarySession,
     onRefresh,
     pdfLoading,
     refreshing,
     rows,
-    savingNext,
     selectedMeta,
     selectedRow,
     selectedSpotKey,

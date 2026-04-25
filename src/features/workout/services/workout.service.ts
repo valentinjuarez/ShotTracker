@@ -24,7 +24,12 @@ export type WorkoutData = {
   shot_type: string;
   sessions_goal: number;
   target_per_spot: number;
+  spot_keys?: string[] | null;
   targets_by_spot?: Record<string, number> | null;
+};
+
+export type WorkoutTemplateData = WorkoutData & {
+  spot_keys: string[];
 };
 
 export type WorkoutSessionDetail = {
@@ -88,6 +93,87 @@ export async function createWorkoutSession(params: {
   return {
     workoutId: (data as { workout_id?: string } | null)?.workout_id ?? null,
     sessionId,
+  };
+}
+
+export async function updateWorkoutTemplate(params: {
+  workoutId: string;
+  title: string;
+  shotType: "3PT" | "2PT" | "CUSTOM";
+  sessionsGoal: number;
+  targetPerSpot: number;
+  spotKeys: string[];
+  targetsBySpotKey?: Record<string, number>;
+}): Promise<void> {
+  const {
+    workoutId,
+    title,
+    shotType,
+    sessionsGoal,
+    targetPerSpot,
+    spotKeys,
+    targetsBySpotKey,
+  } = params;
+
+  const normalizedTargets =
+    shotType === "CUSTOM" && targetsBySpotKey
+      ? Object.fromEntries(
+          spotKeys
+            .filter((spotKey) => Number.isFinite(targetsBySpotKey[spotKey]))
+            .map((spotKey) => [spotKey, Math.max(1, Math.round(targetsBySpotKey[spotKey]))]),
+        )
+      : null;
+
+  const { error } = await supabase
+    .from("workouts")
+    .update({
+      title,
+      shot_type: shotType,
+      sessions_goal: sessionsGoal,
+      target_per_spot: targetPerSpot,
+      spot_keys: spotKeys,
+      targets_by_spot: normalizedTargets,
+    })
+    .eq("id", workoutId);
+
+  if (error) throw error;
+}
+
+export async function getWorkoutTemplateForEdit(workoutId: string): Promise<WorkoutTemplateData | null> {
+  const workout = await getWorkoutMetadata(workoutId);
+  if (!workout) return null;
+
+  let spotKeys = Array.isArray(workout.spot_keys) ? workout.spot_keys : [];
+
+  if (spotKeys.length === 0) {
+    const { data: templateSession, error: templateSessionError } = await supabase
+      .from("sessions")
+      .select("id")
+      .eq("workout_id", workoutId)
+      .order("session_number", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (templateSessionError) throw templateSessionError;
+
+    if (templateSession?.id) {
+      const { data: spots, error: spotsError } = await supabase
+        .from("session_spots")
+        .select("spot_key")
+        .eq("session_id", templateSession.id)
+        .order("order_index", { ascending: true });
+
+      if (spotsError) throw spotsError;
+
+      spotKeys = (spots ?? []).map((row: any) => row.spot_key as string);
+    }
+  }
+
+  if (spotKeys.length === 0) return null;
+
+  return {
+    ...workout,
+    spot_keys: spotKeys,
   };
 }
 
@@ -161,7 +247,7 @@ export async function getWorkoutSessions(workoutId: string): Promise<SessionRow[
 export async function getWorkoutMetadata(workoutId: string): Promise<WorkoutData | null> {
   const { data, error } = await supabase
     .from("workouts")
-    .select("id, title, shot_type, sessions_goal, target_per_spot, targets_by_spot")
+    .select("id, title, shot_type, sessions_goal, target_per_spot, spot_keys, targets_by_spot")
     .eq("id", workoutId)
     .maybeSingle();
 

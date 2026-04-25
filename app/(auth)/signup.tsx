@@ -4,6 +4,7 @@ import { Link, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -377,18 +378,16 @@ export default function Signup() {
           {/* Logo */}
           <Animated.View style={{ alignItems: "center", marginBottom: 28, opacity: anims.logo, transform: [{ scale: logoScale }] }}>
             <View style={{
-              width: 72, height: 72, borderRadius: 24,
-              backgroundColor: "rgba(99,179,237,0.12)",
-              borderWidth: 1.5, borderColor: "rgba(99,179,237,0.30)",
+              width: 100, height: 100, borderRadius: 24,
+              backgroundColor: "rgba(245,158,11,0.12)",
+              borderWidth: 1.5, borderColor: "rgba(245,158,11,0.32)",
               alignItems: "center", justifyContent: "center",
-              shadowColor: "#63B3ED", shadowOpacity: 0.35, shadowRadius: 24, shadowOffset: { width: 0, height: 4 },
-              elevation: 12,
+              shadowColor: "#F59E0B", shadowOpacity: 0.40, shadowRadius: 28, shadowOffset: { width: 0, height: 4 },
+              elevation: 14,
+              overflow: "hidden",
             }}>
-              <Ionicons name="basketball" size={34} color="rgba(99,179,237,1)" />
+              <Image source={require('@/assets/images/logoLogin.png')} style={{ width: "100%", height: "100%", resizeMode: 'cover' }} />
             </View>
-            <Text style={{ color: "rgba(99,179,237,0.65)", fontWeight: "900", fontSize: 12, letterSpacing: 3, marginTop: 8, textTransform: "uppercase" }}>
-              ShotTracker
-            </Text>
           </Animated.View>
 
           {/* Title */}

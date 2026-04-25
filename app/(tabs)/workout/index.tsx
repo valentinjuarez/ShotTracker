@@ -262,6 +262,12 @@ export default function WorkoutHistory() {
                   isSessLoading={isSessLoading}
                   isExpanded={isExpanded}
                   onToggle={() => toggleExpand(w.id)}
+                  onEditWorkout={() => {
+                    router.push({
+                      pathname: "/(tabs)/workout/create",
+                      params: { workoutId: w.id },
+                    });
+                  }}
                   onDeleteWorkout={() => onDeleteWorkout(w.id)}
                   onDeleteSession={(sess) => onDeleteSession(sess.id, w.id)}
                   onSessionPress={(sess) => {
@@ -292,7 +298,7 @@ export default function WorkoutHistory() {
 // ─── WorkoutCard ──────────────────────────────────────────────────────────────
 
 function WorkoutCard({
-  workout, isDone, precomputedDoneSessions, sessions, isSessLoading, isExpanded, onToggle, onSessionPress, onDeleteWorkout, onDeleteSession, delay,
+  workout, isDone, precomputedDoneSessions, sessions, isSessLoading, isExpanded, onToggle, onSessionPress, onEditWorkout, onDeleteWorkout, onDeleteSession, delay,
 }: {
   workout: WorkoutRow;
   isDone: boolean;
@@ -302,6 +308,7 @@ function WorkoutCard({
   isExpanded: boolean;
   onToggle: () => void;
   onSessionPress: (s: SessionRow) => void;
+  onEditWorkout: () => void;
   onDeleteWorkout: () => void;
   onDeleteSession: (s: SessionRow) => void;
   delay: number;
@@ -380,7 +387,20 @@ function WorkoutCard({
 
           {/* Delete + Chevron */}
           <Pressable
-            onPress={onDeleteWorkout}
+            onPress={(e) => {
+              e.stopPropagation();
+              onEditWorkout();
+            }}
+            hitSlop={12}
+            style={{ padding: 4 }}
+          >
+            <Ionicons name="create-outline" size={15} color="rgba(99,179,237,0.75)" />
+          </Pressable>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              onDeleteWorkout();
+            }}
             hitSlop={12}
             style={{ padding: 4 }}
           >

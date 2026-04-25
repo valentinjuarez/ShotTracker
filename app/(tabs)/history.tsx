@@ -6,14 +6,14 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  View,
+    ActivityIndicator,
+    Alert,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    View,
 } from "react-native";
 
 function pctColor(p: number) {
@@ -35,13 +35,16 @@ export default function History() {
       if (!userId) return;
 
       const rows = await getSessionHistory(userId);
-      setSessions(rows);
+      const freeRows = rows.filter((row) => !row.workout_id);
+      setSessions(freeRows);
 
       // fetch pct for each session
-      if (rows.length > 0) {
-        const ids = rows.map((r) => r.id);
+      if (freeRows.length > 0) {
+        const ids = freeRows.map((r) => r.id);
         const pctMap = await getSessionsWithPercentages(ids);
         setPcts(pctMap);
+      } else {
+        setPcts({});
       }
     } catch {
       // silent

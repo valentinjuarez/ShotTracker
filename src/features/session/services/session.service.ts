@@ -25,8 +25,9 @@ export async function createSessionWithSpots(params: {
   title: string;
   defaultTarget: number;
   selectedSpots: { id: string; shotType: "2PT" | "3PT" }[];
+  spotTargetsById?: Record<string, number>;
 }) {
-  const { userId, title, defaultTarget, selectedSpots } = params;
+  const { userId, title, defaultTarget, selectedSpots, spotTargetsById = {} } = params;
 
   const { data: sessionRow, error: sessionError } = await supabase
     .from("sessions")
@@ -46,16 +47,23 @@ export async function createSessionWithSpots(params: {
   const sessionId = sessionRow?.id as string | undefined;
   if (!sessionId) throw new Error("No se pudo crear la sesión (sin id).");
 
-  const rows = selectedSpots.map((spot, idx) => ({
-    session_id: sessionId,
-    user_id: userId,
-    spot_key: spot.id,
-    shot_type: spot.shotType,
-    target_attempts: defaultTarget,
-    attempts: defaultTarget,
-    makes: 0,
-    order_index: idx,
-  }));
+  const rows = selectedSpots.map((spot, idx) => {
+    const customTarget = spotTargetsById[spot.id];
+    const target = Number.isFinite(customTarget)
+      ? Math.max(1, Math.min(100, Number(customTarget)))
+      : defaultTarget;
+
+    return {
+      session_id: sessionId,
+      user_id: userId,
+      spot_key: spot.id,
+      shot_type: spot.shotType,
+      target_attempts: target,
+      attempts: target,
+      makes: 0,
+      order_index: idx,
+    };
+  });
 
   const { error: spotsError } = await supabase.from("session_spots").insert(rows);
   if (spotsError) {

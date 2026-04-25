@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import React, { useRef, useState } from "react";
 import { Animated, Modal, Pressable, Text } from "react-native";
 
@@ -13,7 +14,6 @@ export function HelpHint({
   title = "Ayuda rápida",
   message,
   storageKey,
-  align = "right",
 }: HelpHintProps) {
   const [open, setOpen] = useState(false);
   const scale = useRef(new Animated.Value(1)).current;
@@ -79,18 +79,23 @@ export function HelpHint({
         <Animated.View
           style={{
             flex: 1,
-            backgroundColor: "rgba(0,0,0,0.30)",
+            backgroundColor: "rgba(0,0,0,0.42)",
             alignItems: "center",
             justifyContent: "center",
             opacity: fade,
           }}
         >
+          <BlurView
+            intensity={30}
+            tint="dark"
+            style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
+          />
           <Pressable style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} onPress={toggle} />
           <Animated.View
             style={{
               width: "86%",
               maxWidth: 340,
-              alignSelf: align === "left" ? "flex-start" : "flex-end",
+              alignSelf: "center",
               padding: 14,
               borderRadius: 14,
               backgroundColor: "rgba(11,18,32,0.98)",

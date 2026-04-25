@@ -225,11 +225,6 @@ export default function RunSession() {
             </Text>
           </Pressable>
         </View>
-
-        {/* Mini hint */}
-        <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 12 }}>
-          Tip: guardá cada spot para avanzar en orden.
-        </Text>
       </View>
     </SafeAreaView>
   );

@@ -101,7 +101,8 @@ export function usePlayerHomeController() {
       setWeeklyAttempts(weekTotals.attempts);
       setWeeklyPct(weekTotals.attempts > 0 ? weekTotals.makes / weekTotals.attempts : null);
 
-      const last = sessions[0] ?? null;
+      const freeSessions = sessions.filter((s) => !s.workout_id);
+      const last = freeSessions[0] ?? null;
       setLastSession(last);
       if (last) {
         const totals = bySession[last.id] ?? { attempts: 0, makes: 0 };

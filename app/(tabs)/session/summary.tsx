@@ -3,9 +3,9 @@ import { ALL_SPOTS } from "@/src/data/spots";
 import { getCurrentUserMetadata } from "@/src/features/auth/services/auth.service";
 import { useSessionSummaryController } from "@/src/features/session/hooks/useSessionSummaryController";
 import {
-  getSessionSpotsForPdf,
-  getWorkoutSessionsForPdf,
-  type SessionSpotRow,
+    getSessionSpotsForPdf,
+    getWorkoutSessionsForPdf,
+    type SessionSpotRow,
 } from "@/src/features/session/services/session.service";
 import { type WorkoutData } from "@/src/features/workout/services/workout.service";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,16 +16,16 @@ import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useEffect, useRef } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Text,
+    useWindowDimensions,
+    View,
 } from "react-native";
 import Svg, { Circle, Defs, Line, Path, RadialGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 
@@ -113,15 +113,15 @@ export default function SessionSummary() {
 
   const {
     completedSessions,
-    createNextSession,
+    goToNextSummary,
     handleShareTeam,
     loading,
     mode,
+    nextSummarySession,
     onRefresh,
     pdfLoading,
     refreshing,
     rows,
-    savingNext,
     selectedMeta,
     selectedRow,
     selectedSpotKey,
@@ -429,24 +429,18 @@ export default function SessionSummary() {
           ) : null}
 
           {/* ── Primary CTA ─────────────────────────────────────────────── */}
-          {workout && completedSessions < workout.sessions_goal ? (
-            /* Next workout session */
+          {workout && nextSummarySession ? (
+            /* Next existing summary in workout */
             <SpringBtn
-              onPress={createNextSession}
+              onPress={goToNextSummary}
               onHaptic={() => onHaptic()}
               style={{ height: 54, borderRadius: 18, backgroundColor: "#F59E0B",
                 alignItems: "center" as const, justifyContent: "center" as const,
                 flexDirection: "row" as const, gap: 10 }}>
-              {savingNext ? (
-                <ActivityIndicator color="#0B1220" />
-              ) : (
-                <>
-                  <Ionicons name="arrow-forward-circle" size={20} color="#0B1220" />
-                  <Text style={{ color: "#0B1220", fontWeight: "900", fontSize: 15 }}>
-                    Siguiente · Sesión {completedSessions + 1} de {workout.sessions_goal}
-                  </Text>
-                </>
-              )}
+              <Ionicons name="arrow-forward-circle" size={20} color="#0B1220" />
+              <Text style={{ color: "#0B1220", fontWeight: "900", fontSize: 15 }}>
+                Siguiente resumen · Sesión {nextSummarySession.sessionNumber}
+              </Text>
             </SpringBtn>
           ) : !workout ? (
             /* Free session — new free session */

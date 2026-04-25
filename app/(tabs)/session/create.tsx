@@ -51,6 +51,7 @@ export default function CreateSession() {
   const {
     applyMode,
     canContinue,
+    changeSpotTarget,
     createSessionAndGo,
     currentSpot,
     currentSpotIndex,
@@ -60,10 +61,13 @@ export default function CreateSession() {
     selected,
     selectedCount,
     selectedSpots,
+    setSpotTargetFromInput,
     setCurrentSpotIndex,
     setDefaultTarget,
     setShowCourtModal,
     showCourtModal,
+    targetForSpot,
+    totalTargetAttempts,
     toggleSpot,
   } = useCreateSessionController();
 
@@ -276,7 +280,7 @@ export default function CreateSession() {
                     }}>
                       <Ionicons name="basketball" size={12} color="rgba(255,255,255,0.65)" />
                       <Text style={{ color: "rgba(255,255,255,0.65)", fontWeight: "700", fontSize: 12 }}>
-                        {selectedCount * defaultTarget} tiros total
+                        {totalTargetAttempts} tiros total
                       </Text>
                     </View>
                   </>
@@ -344,6 +348,84 @@ export default function CreateSession() {
             />
           </View>
         </Animated.View>
+
+        {/*  Per-spot target editor  */}
+        {selectedCount > 0 && (
+          <Animated.View style={targetAnim}>
+            <View style={{
+              padding: 16,
+              borderRadius: 18,
+              backgroundColor: "rgba(255,255,255,0.055)",
+              borderWidth: 1,
+              borderColor: "rgba(255,255,255,0.10)",
+              gap: 10,
+            }}>
+              <Text style={{ color: "rgba(255,255,255,0.80)", fontSize: 14, fontWeight: "800" }}>
+                Intentos por spot seleccionados
+              </Text>
+              <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 12 }}>
+                Ajusta por posición para distribuir mejor tu volumen de tiros.
+              </Text>
+
+              <View style={{ gap: 8 }}>
+                {selectedSpots.map((spot) => {
+                  const target = targetForSpot(spot.id);
+                  const typeLabel = spot.shotType === "3PT" ? "Triple" : "Doble";
+                  return (
+                    <View
+                      key={spot.id}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingVertical: 9,
+                        paddingHorizontal: 10,
+                        borderRadius: 12,
+                        backgroundColor: "rgba(255,255,255,0.05)",
+                        borderWidth: 1,
+                        borderColor: "rgba(255,255,255,0.09)",
+                      }}
+                    >
+                      <View>
+                        <Text style={{ color: "white", fontWeight: "800", fontSize: 13 }}>
+                          {typeLabel} {spot.label}
+                        </Text>
+                        <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 11 }}>
+                          {spot.id}
+                        </Text>
+                      </View>
+
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <MiniCounterBtn label="−" onPress={() => changeSpotTarget(spot.id, -1)} />
+                        <TextInput
+                          value={String(target)}
+                          onChangeText={(t) => setSpotTargetFromInput(spot.id, t)}
+                          keyboardType="number-pad"
+                          maxLength={3}
+                          style={{
+                            minWidth: 54,
+                            height: 34,
+                            borderRadius: 10,
+                            backgroundColor: "rgba(255,255,255,0.08)",
+                            borderWidth: 1,
+                            borderColor: "rgba(255,255,255,0.14)",
+                            color: "white",
+                            fontWeight: "900",
+                            fontSize: 15,
+                            textAlign: "center",
+                            paddingVertical: 0,
+                            paddingHorizontal: 8,
+                          }}
+                        />
+                        <MiniCounterBtn label="+" onPress={() => changeSpotTarget(spot.id, +1)} />
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          </Animated.View>
+        )}
 
         {/*  Footer  */}
         <Animated.View style={[footerAnim, { gap: 10 }]}>
@@ -495,6 +577,26 @@ export default function CreateSession() {
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+function MiniCounterBtn({ label, onPress }: { label: "−" | "+"; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        width: 30,
+        height: 30,
+        borderRadius: 9,
+        backgroundColor: "rgba(255,255,255,0.08)",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.12)",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ color: "white", fontWeight: "900", fontSize: 18, lineHeight: 20 }}>{label}</Text>
+    </Pressable>
   );
 }
 

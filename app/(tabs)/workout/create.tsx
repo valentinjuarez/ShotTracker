@@ -2,13 +2,17 @@
 import { ALL_SPOTS, DOBLE_SPOTS, TRIPLE_SPOTS } from "@/src/data/spots";
 import { getCurrentUserId } from "@/src/features/auth/services/auth.service";
 import { Court } from "@/src/features/session/components/Court";
-import { createWorkoutSession } from "@/src/features/workout/services/workout.service";
+import {
+  createWorkoutSession,
+  getWorkoutTemplateForEdit,
+  updateWorkoutTemplate,
+} from "@/src/features/workout/services/workout.service";
 import { useNetworkStatus } from "@/src/hooks/useNetworkStatus";
 import { HelpHint } from "@/src/shared/components/ui/HelpHint";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -58,6 +62,9 @@ function useCounterAnim() {
 export default function CreateWorkout() {
   const { width } = useWindowDimensions();
   const isSmall   = width < 360;
+  const { workoutId } = useLocalSearchParams<{ workoutId?: string }>();
+  const editWorkoutId = Array.isArray(workoutId) ? workoutId[0] : workoutId;
+  const isEditing = !!editWorkoutId;
 
   const courtW = Math.min(width - (isSmall ? 32 : 40), 420);
   const courtH = Math.round(courtW * 1.08);
@@ -69,6 +76,7 @@ export default function CreateWorkout() {
   const [spotTargetsById, setSpotTargetsById] = useState<Record<string, number>>({});
   const [nameFocused, setNameFocused] = useState(false);
   const [saving, setSaving]           = useState(false);
+  const [loadingWorkout, setLoadingWorkout] = useState(isEditing);
   const { isOnline } = useNetworkStatus();
 
   const router    = useRouter();
@@ -93,6 +101,40 @@ export default function CreateWorkout() {
     () => spots.filter((s) => selectedInScope.has(s.id)),
     [spots, selectedInScope],
   );
+
+  useEffect(() => {
+    if (!isEditing || !editWorkoutId) {
+      setLoadingWorkout(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setLoadingWorkout(true);
+        const workout = await getWorkoutTemplateForEdit(editWorkoutId);
+        if (!workout) throw new Error("No se pudo cargar la planilla.");
+        if (cancelled) return;
+
+        setName(workout.title ?? "Planilla de tiro");
+        setTipo((workout.shot_type as PlanTipo) ?? "3PT");
+        setSessionsGoal(workout.sessions_goal ?? 1);
+        setDefaultTarget(workout.target_per_spot ?? 1);
+        setSpotTargetsById((workout.targets_by_spot ?? {}) as Record<string, number>);
+        setSelected(new Set(workout.spot_keys ?? []));
+      } catch (e: any) {
+        Alert.alert("Error", e?.message ?? "No se pudo cargar la planilla.");
+        router.back();
+      } finally {
+        if (!cancelled) setLoadingWorkout(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editWorkoutId, isEditing, router]);
 
   function targetForSpot(spotId: string) {
     return Math.max(1, spotTargetsById[spotId] ?? defaultTarget);
@@ -129,7 +171,9 @@ export default function CreateWorkout() {
     name.trim().length > 0 &&
     selectedCount > 0 &&
     sessionsGoal > 0 &&
-    defaultTarget > 0;
+    defaultTarget > 0 &&
+    !loadingWorkout &&
+    !saving;
 
   function setAll(on: boolean) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -183,7 +227,9 @@ export default function CreateWorkout() {
     if (isOnline === false) {
       Alert.alert(
         "Sin conexión",
-        "Las planillas se sincronizan con el servidor al crearlas. Conectá internet e intentá de nuevo.",
+        isEditing
+          ? "Necesitás conexión para guardar los cambios de la planilla."
+          : "Las planillas se sincronizan con el servidor al crearlas. Conectá internet e intentá de nuevo.",
       );
       return;
     }
@@ -206,6 +252,24 @@ export default function CreateWorkout() {
       const shotTypeForCreate: "3PT" | "2PT" | "CUSTOM" =
         tipo === "CUSTOM" ? "CUSTOM" : tipo;
 
+      if (isEditing) {
+        if (!editWorkoutId) throw new Error("Falta workoutId.");
+
+        await updateWorkoutTemplate({
+          workoutId: editWorkoutId,
+          title: name.trim(),
+          shotType: shotTypeForCreate,
+          sessionsGoal,
+          targetPerSpot: defaultTarget,
+          spotKeys: orderedSpotKeys,
+          targetsBySpotKey: customTargets,
+        });
+
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        router.replace("/(tabs)/workout");
+        return;
+      }
+
       const { workoutId, sessionId } = await createWorkoutSession({
         title: name.trim(),
         shotType: shotTypeForCreate,
@@ -226,7 +290,7 @@ export default function CreateWorkout() {
       });
     } catch (e: any) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Error", e?.message ?? "No se pudo crear la planilla.");
+      Alert.alert("Error", e?.message ?? (isEditing ? "No se pudo guardar la planilla." : "No se pudo crear la planilla."));
     } finally {
       setSaving(false);
     }
@@ -256,6 +320,14 @@ export default function CreateWorkout() {
   const a4 = useFadeSlide(260);
   const a5 = useFadeSlide(320);
 
+  if (isEditing && loadingWorkout) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220", alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator color="#F59E0B" />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
       {/* Ambient glow */}
@@ -284,19 +356,23 @@ export default function CreateWorkout() {
         <Animated.View style={[{ gap: 4 }, a0]}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 12, fontWeight: "600", letterSpacing: 0.3 }}>
-              Nueva planilla
+              {isEditing ? "Editar planilla" : "Nueva planilla"}
             </Text>
             <HelpHint
               storageKey="@onboarding_workout_create_header"
-              title="¿Qué es una planilla?"
-              message="Es un plan con varias sesiones. Definís tipo de tiro, spots, intentos y objetivo para seguir avances en el tiempo."
+              title={isEditing ? "Editar planilla" : "¿Qué es una planilla?"}
+              message={isEditing
+                ? "Editá spots, intentos y objetivo. Los cambios se aplicarán a las próximas sesiones."
+                : "Es un plan con varias sesiones. Definís tipo de tiro, spots, intentos y objetivo para seguir avances en el tiempo."}
             />
           </View>
           <Text style={{ color: "white", fontSize: 24, fontWeight: "900", letterSpacing: -0.5 }}>
-            Crear planilla 🏀
+            {isEditing ? "Editar planilla" : "Crear planilla 🏀"}
           </Text>
           <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 13, lineHeight: 18, marginTop: 2 }}>
-            Configurá un ciclo de entrenamiento y elegí tus posiciones en la cancha.
+            {isEditing
+              ? "Ajustá las posiciones y los intentos para la próxima sesión."
+              : "Configurá un ciclo de entrenamiento y elegí tus posiciones en la cancha."}
           </Text>
         </Animated.View>
 
@@ -575,8 +651,10 @@ export default function CreateWorkout() {
           <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 8 }}>
             <HelpHint
               storageKey="@onboarding_workout_create_button"
-              title="Crear planilla"
-              message="Al crearla, se genera automáticamente la primera sesión para empezar de inmediato y guardar progreso por spot."
+              title={isEditing ? "Guardar cambios" : "Crear planilla"}
+              message={isEditing
+                ? "Los cambios quedarán guardados para las próximas sesiones de esta planilla."
+                : "Al crearla, se genera automáticamente la primera sesión para empezar de inmediato y guardar progreso por spot."}
             />
           </View>
           <Pressable
@@ -610,7 +688,7 @@ export default function CreateWorkout() {
                   color: canCreate ? "#0B1220" : "rgba(255,255,255,0.22)",
                   fontWeight: "900", fontSize: 15, letterSpacing: 0.1,
                 }}>
-                  Crear planilla
+                  {isEditing ? "Guardar cambios" : "Crear planilla"}
                 </Text>
               </>
             )}
