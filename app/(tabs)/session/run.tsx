@@ -2,18 +2,25 @@ import { ALL_SPOTS } from "@/src/data/spots";
 import { Court } from "@/src/features/session/components/Court";
 import { useRunSessionController } from "@/src/features/session/hooks/useRunSessionController";
 import { Ionicons } from "@expo/vector-icons";
+import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Pressable,
-    SafeAreaView,
-    Text,
-    useWindowDimensions,
-    View,
+  ActivityIndicator,
+  Keyboard,
+  Pressable,
+  SafeAreaView,
+  Text,
+  TextInput,
+  TouchableWithoutFeedback,
+  useWindowDimensions,
+  View,
 } from "react-native";
 
 export default function RunSession() {
   const { width } = useWindowDimensions();
   const isSmall = width < 360;
+  const [inputFocused, setInputFocused] = useState(false);
+  const [inputSpotCue, setInputSpotCue] = useState(false);
+  const inputRef = useRef<TextInput>(null);
 
   const courtW = Math.min(width - (isSmall ? 32 : 40), 520);
   const courtH = Math.round(courtW * 1.08);
@@ -37,6 +44,17 @@ export default function RunSession() {
     spotMeta,
     spotsRows,
   } = useRunSessionController();
+
+  useEffect(() => {
+    if (loading || !currentRow) return;
+
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+    setInputSpotCue(true);
+
+    const timer = setTimeout(() => setInputSpotCue(false), 550);
+    return () => clearTimeout(timer);
+  }, [idx, loading, currentRow]);
 
   if (loading) {
     return (
@@ -62,6 +80,8 @@ export default function RunSession() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <View style={{ flex: 1 }}>
       {/* Banner offline / pendiente de sincronizar */}
       {(isOnline === false || pendingSync > 0) && (
         <View style={{
@@ -141,27 +161,66 @@ export default function RunSession() {
         <View
           style={{
             borderRadius: 18,
-            padding: 14,
+            paddingHorizontal: 16,
+            paddingVertical: 14,
             backgroundColor: "rgba(255,255,255,0.06)",
             borderWidth: 1,
             borderColor: "rgba(255,255,255,0.10)",
-            gap: 10,
+            gap: 12,
           }}
         >
-          <Text style={{ color: "rgba(255,255,255,0.70)", fontSize: 12 }}>
-            Metidos (sobre {attempts})
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={{ color: "rgba(255,255,255,0.70)", fontSize: 13 }}>
+              Metidos (sobre {attempts})
+            </Text>
+            <Text style={{ color: "rgba(255,255,255,0.65)", fontSize: 13 }}>
+              Porcentaje: <Text style={{ color: "white", fontWeight: "900" }}>{pct}%</Text>
+            </Text>
+          </View>
 
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={{ color: "white", fontWeight: "900", fontSize: 34 }}>
               {clampMakes(makesDraft)}/{attempts}
             </Text>
 
-            <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 }}>
               <RoundBtn
                 disabled={saving}
                 label="-"
                 onPress={() => setMakesDraft((v) => clampMakes(v - 1))}
+              />
+              <TextInput
+                ref={inputRef}
+                editable={!saving}
+                keyboardType="number-pad"
+                blurOnSubmit
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+                value={String(clampMakes(makesDraft))}
+                onChangeText={(raw) => {
+                  const digitsOnly = raw.replace(/\D/g, "");
+                  if (!digitsOnly) {
+                    setMakesDraft(0);
+                    return;
+                  }
+                  const parsed = Number(digitsOnly);
+                  setMakesDraft(clampMakes(Number.isFinite(parsed) ? parsed : 0));
+                }}
+                style={{
+                  width: 54,
+                  height: 54,
+                  borderRadius: 18,
+                  backgroundColor: "rgba(255,255,255,0.06)",
+                  borderWidth: inputFocused || inputSpotCue ? 2 : 1,
+                  borderColor: inputFocused || inputSpotCue ? "#F59E0B" : "rgba(255,255,255,0.20)",
+                  color: "white",
+                  fontWeight: "900",
+                  fontSize: 20,
+                  textAlign: "center",
+                  opacity: saving ? 0.6 : 1,
+                }}
               />
               <RoundBtn
                 disabled={saving}
@@ -170,10 +229,6 @@ export default function RunSession() {
               />
             </View>
           </View>
-
-          <Text style={{ color: "rgba(255,255,255,0.65)" }}>
-            Porcentaje: <Text style={{ color: "white", fontWeight: "900" }}>{pct}%</Text>
-          </Text>
         </View>
 
         {/* Actions */}
@@ -226,6 +281,8 @@ export default function RunSession() {
           </Pressable>
         </View>
       </View>
+      </View>
+      </TouchableWithoutFeedback>
     </SafeAreaView>
   );
 }

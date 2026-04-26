@@ -54,6 +54,24 @@ export type CoachSharedWorkoutEntry = {
   playerAvatarUrl?: string | null;
 };
 
+type SharedWorkoutRow = {
+  id: string;
+  workout_id: string;
+  user_id: string;
+  shared_at: string | null;
+  workout_title: string;
+  workout_status: string;
+  shot_type: string;
+  sessions_goal: number;
+};
+
+type SessionRow = {
+  id: string;
+  user_id: string | null;
+  started_at: string;
+  workout_id?: string | null;
+};
+
 export type SpotBreakdown = {
   spot_key: string;
   shot_type: string;
@@ -445,7 +463,15 @@ export async function getCoachDashboard(userId: string): Promise<{ team: Team; p
           : null,
       lastActive: lastActiveMap[pId] ?? null,
     }))
-    .sort((a, b) => (b.lastActive || "").localeCompare(a.lastActive || ""));
+    .sort((a, b) => {
+      const aPct = a.pct ?? -1;
+      const bPct = b.pct ?? -1;
+
+      if (bPct !== aPct) return bPct - aPct;
+      if (b.sessions !== a.sessions) return b.sessions - a.sessions;
+
+      return (b.lastActive || "").localeCompare(a.lastActive || "");
+    });
 
   return { team: t, players };
 }
@@ -526,8 +552,8 @@ export async function getCoachSharedWorkouts(coachUserId: string): Promise<Coach
 
   if (error) throw error;
 
-  const sharedRows = shared ?? [];
-  const playerIds: string[] = [...new Set(sharedRows.map((s: any) => s.user_id as string))];
+  const sharedRows: SharedWorkoutRow[] = shared ?? [];
+  const playerIds: string[] = [...new Set(sharedRows.map((s) => s.user_id))];
   const profileMap: Record<string, { name: string; avatarUrl: string | null }> = {};
 
   if (playerIds.length > 0) {
@@ -712,20 +738,20 @@ export async function getCoachPlayersDetailed(coachUserId: string): Promise<Coac
     workoutOwnerMap[w.id] = w.user_id;
   });
 
-  let workoutSessions: any[] = [];
+  let workoutSessions: SessionRow[] = [];
   if (wkIds.length > 0) {
     const { data: ws } = await supabase
       .from("sessions")
       .select("id, workout_id, started_at")
       .in("workout_id", wkIds)
       .order("started_at", { ascending: false });
-    workoutSessions = ws ?? [];
+    workoutSessions = (ws ?? []) as SessionRow[];
   }
 
-  const freeRows = (sessions ?? []).map((s: any) => ({ id: s.id, user_id: s.user_id, started_at: s.started_at }));
-  const wkRows = workoutSessions.map((s: any) => ({
+  const freeRows: SessionRow[] = (sessions ?? []).map((s: any) => ({ id: s.id, user_id: s.user_id, started_at: s.started_at }));
+  const wkRows: SessionRow[] = workoutSessions.map((s) => ({
     id: s.id,
-    user_id: workoutOwnerMap[s.workout_id] ?? null,
+    user_id: s.workout_id ? (workoutOwnerMap[s.workout_id] ?? null) : null,
     started_at: s.started_at,
   }));
 
